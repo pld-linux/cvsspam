@@ -2,7 +2,7 @@ Summary:	CVSspam emails you diffs when someone commits a change to your CVS repo
 Summary(pl):	CVSspam - wysy³anie ró¿nic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.11
-Release:	5.2
+Release:	5.3
 Epoch:		0
 License:	GPL
 Group:		Applications/System
@@ -16,12 +16,14 @@ Patch4:		%{name}-optkb_binary_hint.patch
 Patch5:		%{name}-encode_email_personal_name.patch
 Patch6:		%{name}-cvsroot_trailing_slash.patch
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
+BuildRequires:	rpmbuild(macros) >= 1.177
 Requires:	cvs
 Requires:	ruby
+BuildArch:	noarch
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %define		_sysconfdir	/etc/%{name}
-%define		_libdir		%{_prefix}/%{_lib}/%{name}
+%define		_datadir	%{_prefix}/share/%{name}
 
 %description
 CVSspam sends email when a change is committed to the CVS repository.
@@ -47,18 +49,32 @@ mo¿liwe, generowane s± odno¶niki do frontendów WWW do CVS i systemów
 
 %install
 rm -rf $RPM_BUILD_ROOT
-install -d $RPM_BUILD_ROOT{%{_libdir},%{_sysconfdir}}
+install -d $RPM_BUILD_ROOT{%{_libdir},%{_datadir},%{_sysconfdir}}
 
-install {collect_diffs,cvsspam,record_lastdir}.rb $RPM_BUILD_ROOT%{_libdir}
+install {collect_diffs,cvsspam,record_lastdir}.rb $RPM_BUILD_ROOT%{_datadir}
 install cvsspam.conf $RPM_BUILD_ROOT%{_sysconfdir}
+
+ln -s %{_datadir} $RPM_BUILD_ROOT%{_libdir}/%{name}
 
 %clean
 rm -rf $RPM_BUILD_ROOT
 
+# make compat symlink, the symlink is discarded using %ghost on package uninstall
+%triggerpostun -- cvsspam < 0.2.11-5.3
+# need rmdir, because the path belongs to new package (is %ghosted) and therefore is not removed by rpm
+rmdir %{_libdir}/%{name}
+ln -s %{_datadir} %{_libdir}/%{name}
+%banner %{name} -e <<EOF
+NOTE: The cvsspam programs have moved to %{_datadir}.
+I've created compat symlink so you don't feel so much pain of that.
+
+EOF
+
 %files
 %defattr(644,root,root,755)
 %doc CREDITS TODO cvsspam-doc.pdf cvsspam-doc.html
-%dir %{_libdir}
-%attr(755,root,root) %{_libdir}/*
+%dir %{_datadir}
+%attr(755,root,root) %{_datadir}/*
+%ghost %{_libdir}/%{name}
 %dir %{_sysconfdir}
 %config(noreplace) %verify(not md5 mtime size) %{_sysconfdir}/*
