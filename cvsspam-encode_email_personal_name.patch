@@ -1,0 +1,226 @@
+Index: cvsspam.rb
+===================================================================
+RCS file: /var/lib/cvs/cvsspam/cvsspam.rb,v
+retrieving revision 1.65
+diff -u -r1.65 cvsspam.rb
+--- cvsspam.rb	20 Feb 2005 13:35:15 -0000	1.65
++++ cvsspam.rb	20 Feb 2005 17:25:01 -0000
+@@ -122,24 +122,49 @@
+   # long values with header continuation lines as needed
+   def rfc2047_encode_quoted(io, start, rest)
+     raise "no charset" if @charset.nil?
+-    code_begin = "=?#{@charset}?#{@encoding}?"
++    code_begin = marker_start_quoted
+     start << code_begin
+-    rest.each_byte do |b|
+-      code = if b>126 || b==UNDERSCORE || b==TAB
+-        sprintf("=%02x", b)
+-      elsif b == SPACE
+-        "_"
+-      else
+-        b.chr
+-      end
+-
++    each_char_encoded(rest) do |code|
+       if start.length+code.length+2 > @right_margin
+-        io.puts(start + "?=")
++        io.puts(start + marker_end_quoted)
+         start = " " + code_begin
+       end
+       start << code
+     end
+-    io.puts(start + "?=")
++    io.puts(start + marker_end_quoted)
++  end
++
++  # return a string representing the given character-code in quoted-printable
++  # format
++  def quoted_encode_char(b)
++    if b>126 || b==UNDERSCORE || b==TAB
++      sprintf("=%02x", b)
++    elsif b == SPACE
++      "_"
++    else
++      b.chr
++    end
++  end
++
++  public
++
++  # yields a quoted-printable version of each byte in the given string
++  def each_char_encoded(text)
++    text.each_byte do |b|
++      yield quoted_encode_char(b)
++    end
++  end
++
++  # gives the string "?=",which is used to mark the end of a quoted-printable
++  # characte rsequence
++  def marker_end_quoted
++    "?="
++  end
++
++  # gives a string starting "=?", and including a charset specification, that
++  # marks the start of a quoted-printable character sequence
++  def marker_start_quoted
++    "=?#{@charset}?#{@encoding}?"
+   end
+ 
+   # test to see of the given string contains non-ASCII characters
+@@ -1145,6 +1170,60 @@
+   end
+ end
+ 
++# an RFC 822 email address
++class EmailAddress
++  def initialize(text)
++    if text =~ /^\s*([^<]+?)\s*<\s*([^>]+?)\s*>\s*$/
++      @personal_name = $1
++      @address = $2
++    else
++      @personal_name = nil
++      @address = text
++    end
++  end
++
++  attr_accessor :personal_name, :address
++
++  def has_personal_name?
++    return !@personal_name.nil?
++  end
++
++  def encoded
++    if has_personal_name?
++      "#{encoded_personal_name} <#{address}>"
++    else
++      @address
++    end
++  end
++
++  def to_s
++    if has_personal_name?
++      "#{personal_name} <#{address}>"
++    else
++      @address
++    end
++  end
++
++  private
++
++  def encoded_personal_name
++    personal_name.split(" ").map{|word| encode_word(word)}.join(" ")
++  end
++
++  # rfc2047 encode the word, if it contains non-ASCII characters
++  def encode_word(word)
++    if $encoder.requires_rfc2047?(word)
++      encoded = $encoder.marker_start_quoted
++      $encoder.each_char_encoded(word) do |code|
++	encoded << code
++      end
++      encoded << $encoder.marker_end_quoted
++      return encoded
++    end
++    word
++  end
++end
++
+ 
+ cvsroot_dir = "#{ENV['CVSROOT']}/CVSROOT"
+ $config = "#{cvsroot_dir}/cvsspam.conf"
+@@ -1183,10 +1262,10 @@
+ )
+ 
+ opts.each do |opt, arg|
+-  $recipients << arg if opt=="--to"
++  $recipients << EmailAddress.new(arg) if opt=="--to"
+   $config = arg if opt=="--config"
+   $debug = true if opt=="--debug"
+-  $from_address = arg if opt=="--from"
++  $from_address = EmailAddress.new(arg) if opt=="--from"
+   # must use different variable as the config is readed later.
+   $arg_charset = arg if opt == "--charset"
+ end
+@@ -1218,7 +1297,7 @@
+ end
+ # helper function called from the 'config file'
+ def addRecipient(email)
+-  $recipients << email
++  $recipients << EmailAddress.new(email)
+ end
+ # 'constant' used from the 'config file'
+ class GUESS
+@@ -1333,6 +1412,7 @@
+ end
+ 
+ $encoder = HeaderEncoder.new
++# TODO: maybe we should use the system-default value instead of ISO Latin 1?
+ $encoder.charset = $charset.nil? ? "ISO-8859-1" : $charset
+ 
+ 
+@@ -1572,19 +1652,19 @@
+ # Tries to look up an 'alias' email address for the given string in the
+ # CVSROOT/users file, if the file exists.  The argument is returned unchanged
+ # if no alias is found.
+-def sender_alias(address)
++def sender_alias(email)
+   if File.exists?($users_file)
+     File.open($users_file) do |io|
+       io.each_line do |line|
+         if line =~ /^([^:]+)\s*:\s*(['"]?)([^\n\r]+)(\2)/
+-          if address == $1
+-            return $3
++          if email.address == $1
++            return EmailAddress.new($3)
+           end
+         end
+       end
+     end
+   end
+-  address
++  email
+ end
+ 
+ # A handle for code that needs to add headers and a body to an email being
+@@ -1628,13 +1708,13 @@
+     blah("invoking '#{cmd}'")
+     IO.popen(cmd, "w") do |mail|
+       ctx = MailContext.new(mail) 
+-      ctx.header("To", recipients.join(','))
++      ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
+       if from
+         blah("Mail From: <#{from}>")
+       else
+         blah("Mail From not set")
+       end
+-      ctx.header("From", from) if from
++      ctx.header("From", from.encoded) if from
+       yield ctx
+     end
+   end
+@@ -1662,19 +1742,19 @@
+ 
+   def send(from, recipients)
+     if from == nil
+-      from = ENV['USER'] || ENV['USERNAME'] || 'cvsspam'
++      from = EmailAddress.new(ENV['USER'] || ENV['USERNAME'] || 'cvsspam')
+     end  
+-    unless from =~ /@/
+-      from = "#{from}@#{ENV['HOSTNAME']||'localhost'}"
++    unless from.address =~ /@/
++      from.address = "#{from.address}@#{ENV['HOSTNAME']||'localhost'}"
+     end
+     smtp = Net::SMTP.new(@smtp_host)
+     blah("connecting to '#{@smtp_host}'")
+     smtp.start()
+-    smtp.ready(from, recipients) do |mail|
++    smtp.ready(from.address, recipients.map{|addr| addr.address}) do |mail|
+       ctx = MailContext.new(IOAdapter.new(mail))
+-      ctx.header("To", recipients.join(','))
++      ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
+       blah("Mail From: <#{from}>")
+-      ctx.header("From", from) if from
++      ctx.header("From", from.encoded) if from
+       ctx.header("Date", Time.now.utc.strftime(DATE_HEADER_FORMAT))
+       yield ctx
+     end

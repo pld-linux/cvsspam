@@ -1,0 +1,64 @@
+Index: collect_diffs.rb
+===================================================================
+RCS file: /var/lib/cvs/cvsspam/collect_diffs.rb,v
+retrieving revision 1.22
+diff -u -r1.22 collect_diffs.rb
+--- collect_diffs.rb	22 Dec 2004 13:41:25 -0000	1.22
++++ collect_diffs.rb	20 Feb 2005 01:01:08 -0000
+@@ -196,6 +196,8 @@
+       # record version information
+       file.puts "#V #{change.fromVer},#{change.toVer}"
+ 
++      # remember that the 'binary' option was set for this file
++      binary_file = false
+       # note if the file is on a branch
+       tag = nil
+       if change.isRemoval
+@@ -210,6 +212,10 @@
+ 	if status =~ /^\s*Sticky Tag:\s*(.+) \(branch: +/m
+ 	  tag = $1
+ 	end
++
++	if status =~ /^\s*Sticky Options:\s*-kb/m
++	  binary_file = true
++	end
+       end
+       file.puts "#T #{tag}" unless tag.nil?
+ 
+@@ -232,17 +238,25 @@
+       end
+       file.puts "#{$repository_path}/#{change.file}"
+       diff_cmd << change.file
+-      # do a cvs diff and place the output into our temp file
+-      blah("about to run #{diff_cmd.join(' ')}")
+-      safer_popen(*diff_cmd) do |pipe|
+-        # skip over cvs-diff's preamble
+-        pipe.each do |line|
+-          break if line =~ /^diff /
+-        end
+-        file.puts "#U #{line}"
+-        pipe.each do |line|
+-          file.puts "#U #{line}"
+-        end
++      if binary_file
++      	blah("not diffing #{change.file}; has -kb set")
++	# fake diff lines that will cause cvsspam.rb to consider this a binary
++	# file,
++	file.puts "#U diff x x"
++	file.puts "#U Binary files x and y differ"
++      else
++	# do a cvs diff and place the output into our temp file
++	blah("about to run #{diff_cmd.join(' ')}")
++	safer_popen(*diff_cmd) do |pipe|
++	  # skip over cvs-diff's preamble
++	  pipe.each do |line|
++	    break if line =~ /^diff /
++	  end
++	  file.puts "#U #{line}"
++	  pipe.each do |line|
++	    file.puts "#U #{line}"
++	  end
++	end
+       end
+       # TODO: don't how to do this reliably on different systems...
+       #fail "cvsdiff did not give exit status 1 for invocation: #{diff_cmd.join(' ')}" unless ($?>>8)==1
