@@ -1,4 +1,5 @@
-Summary:	CVSspam emails you diffs when someone commits a change to your CVS repository.
+Summary:	CVSspam emails you diffs when someone commits a change to your CVS repository
+Summary(pl):	CVSspam - wysy³anie ró¿nic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.11
 Release:	0.1
@@ -8,11 +9,11 @@ Group:		Applications/System
 Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/%{name}-%{version}.tar.gz
 # Source0-md5:	e2fe350b845ad1d2ff935f623a0f543a
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
-Requires:	ruby
 Requires:	cvs
+Requires:	ruby
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
-%define	_sysconfdir	/etc/%{name}
+%define		_sysconfdir	/etc/%{name}
 
 %description
 CVSspam sends email when a change is committed to the CVS repository.
@@ -20,10 +21,14 @@ Syntax-highlighted diffs describe the changes made, and links to Web
 frontends on CVS and bug tracking systems are generated where
 possible.
 
+%description -l pl
+CVSspam wysy³a wiadomo¶æ po wykonaniu zmiany w repozytorium CVS.
+Ró¿nice z pod¶wietlaniem sk³adni opisuj± wykonane zmiany, a je¶li to
+mo¿liwe, generowane s± odno¶niki do frontendów WWW do CVS i systemów
+¶ledzenia b³êdów.
+
 %prep
 %setup -q
-
-%build
 
 %install
 rm -rf $RPM_BUILD_ROOT
