@@ -2,7 +2,7 @@ Summary:	CVSspam emails you diffs when someone commits a change to your CVS repo
 Summary(pl):	CVSspam - wysy³anie ró¿nic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.11
-Release:	0.1
+Release:	1
 Epoch:		0
 License:	GPL
 Group:		Applications/System
@@ -45,4 +45,4 @@ rm -rf $RPM_BUILD_ROOT
 %doc CREDITS TODO cvsspam-doc.pdf cvsspam-doc.html
 %attr(755,root,root) %{_bindir}/*
 %dir %{_sysconfdir}
-%config(noreplace) %verify(not size mtime md5) %{_sysconfdir}/*
+%config(noreplace) %verify(not md5 mtime size) %{_sysconfdir}/*
