@@ -2,7 +2,7 @@ Summary:	CVSspam emails you diffs when someone commits a change to your CVS repo
 Summary(pl):	CVSspam - wysy³anie ró¿nic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.11
-Release:	2
+Release:	2.5
 Epoch:		0
 License:	GPL
 Group:		Applications/System
@@ -16,6 +16,7 @@ Requires:	ruby
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %define		_sysconfdir	/etc/%{name}
+%define		_libdir		%{_prefix}/%{_lib}/%{name}
 
 %description
 CVSspam sends email when a change is committed to the CVS repository.
@@ -36,9 +37,9 @@ mo¿liwe, generowane s± odno¶niki do frontendów WWW do CVS i systemów
 
 %install
 rm -rf $RPM_BUILD_ROOT
-install -d $RPM_BUILD_ROOT{%{_bindir},%{_sysconfdir}}
+install -d $RPM_BUILD_ROOT{%{_libdir},%{_sysconfdir}}
 
-install collect_diffs.rb cvsspam.rb record_lastdir.rb $RPM_BUILD_ROOT%{_bindir}
+install {collect_diffs,cvsspam,record_lastdir}.rb $RPM_BUILD_ROOT%{_libdir}
 install cvsspam.conf $RPM_BUILD_ROOT%{_sysconfdir}
 
 %clean
@@ -47,6 +48,7 @@ rm -rf $RPM_BUILD_ROOT
 %files
 %defattr(644,root,root,755)
 %doc CREDITS TODO cvsspam-doc.pdf cvsspam-doc.html
-%attr(755,root,root) %{_bindir}/*
+%dir %{_libdir}
+%attr(755,root,root) %{_libdir}/*
 %dir %{_sysconfdir}
 %config(noreplace) %verify(not md5 mtime size) %{_sysconfdir}/*
