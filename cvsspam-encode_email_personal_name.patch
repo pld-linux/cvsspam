@@ -1,10 +1,5 @@
-Index: cvsspam.rb
-===================================================================
-RCS file: /var/lib/cvs/cvsspam/cvsspam.rb,v
-retrieving revision 1.65
-diff -u -r1.65 cvsspam.rb
---- cvsspam.rb	20 Feb 2005 13:35:15 -0000	1.65
-+++ cvsspam.rb	20 Feb 2005 17:25:01 -0000
+--- cvsspam-0.2.11/cvsspam.rb	2005-02-21 21:52:45.000000000 +0200
++++ cvsspam-0.2.11.patched/cvsspam.rb	2005-02-21 21:52:18.000000000 +0200
 @@ -122,24 +122,49 @@
    # long values with header continuation lines as needed
    def rfc2047_encode_quoted(io, start, rest)
@@ -182,23 +177,18 @@ diff -u -r1.65 cvsspam.rb
  end
  
  # A handle for code that needs to add headers and a body to an email being
-@@ -1628,13 +1708,13 @@
+@@ -1628,8 +1708,8 @@
      blah("invoking '#{cmd}'")
      IO.popen(cmd, "w") do |mail|
        ctx = MailContext.new(mail) 
 -      ctx.header("To", recipients.join(','))
-+      ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
-       if from
-         blah("Mail From: <#{from}>")
-       else
-         blah("Mail From not set")
-       end
 -      ctx.header("From", from) if from
++      ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
 +      ctx.header("From", from.encoded) if from
        yield ctx
      end
    end
-@@ -1662,19 +1742,19 @@
+@@ -1657,18 +1737,18 @@
  
    def send(from, recipients)
      if from == nil
@@ -217,9 +207,8 @@ diff -u -r1.65 cvsspam.rb
 +    smtp.ready(from.address, recipients.map{|addr| addr.address}) do |mail|
        ctx = MailContext.new(IOAdapter.new(mail))
 -      ctx.header("To", recipients.join(','))
-+      ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
-       blah("Mail From: <#{from}>")
 -      ctx.header("From", from) if from
++      ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
 +      ctx.header("From", from.encoded) if from
        ctx.header("Date", Time.now.utc.strftime(DATE_HEADER_FORMAT))
        yield ctx
