@@ -62,10 +62,10 @@ rm -rf $RPM_BUILD_ROOT
 # make compat symlink, the symlink is discarded using %ghost on package uninstall
 %triggerpostun -- cvsspam < 0.2.11-5.3
 # need rmdir, because the path belongs to new package (is %ghosted) and therefore is not removed by rpm
-rmdir %{_libdir}/%{name}
+rmdir %{_libdir}/%{name} 2>/dev/null || mv -v %{_libdir}/%{name}{,.rpmsave}
 ln -s %{_datadir} %{_libdir}/%{name}
 %banner %{name} -e <<EOF
-NOTE: The cvsspam programs have moved to %{_datadir}.
+NOTE: The cvsspam programs have been moved to %{_datadir}.
 I've created compat symlink so you don't feel so much pain of that.
 
 EOF
