@@ -1,0 +1,17 @@
+Index: collect_diffs.rb
+===================================================================
+RCS file: /var/lib/cvs/cvsspam/collect_diffs.rb,v
+retrieving revision 1.24
+diff -u -r1.24 collect_diffs.rb
+--- collect_diffs.rb	20 Feb 2005 13:35:15 -0000	1.24
++++ collect_diffs.rb	27 Feb 2005 17:35:12 -0000
+@@ -157,7 +157,8 @@
+     fail "CVSROOT ('#{cvsroot}') doesn't match log preamble ('#{$path}')"
+   end
+ 
+-  $repository_path = $path.slice(cvsroot.length+1, $path.length-cvsroot.length-1)
++  $repository_path = $path.slice(cvsroot.length, $path.length-cvsroot.length)
++  $repository_path.sub!(/^\//, "")  # remove leading '/', if present
+ 
+   if $use_modern_argument_list
+     changes = collect_modern_style_args(cvs_info)
