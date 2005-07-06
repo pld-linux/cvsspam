@@ -2,7 +2,7 @@ Summary:	CVSspam emails you diffs when someone commits a change to your CVS repo
 Summary(pl):	CVSspam - wysy³anie ró¿nic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.11
-Release:	6.2
+Release:	7
 Epoch:		0
 License:	GPL
 Group:		Applications/System
