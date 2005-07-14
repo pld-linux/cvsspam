@@ -1,22 +1,13 @@
 Summary:	CVSspam emails you diffs when someone commits a change to your CVS repository
 Summary(pl):	CVSspam - wysy³anie ró¿nic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
-Version:	0.2.11
-Release:	7
+Version:	0.2.12
+Release:	1
 Epoch:		0
 License:	GPL
 Group:		Applications/System
-Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/%{name}-%{version}.tar.gz
-# Source0-md5:	e2fe350b845ad1d2ff935f623a0f543a
-Patch0:		%{name}-users-quote.patch
-Patch1:		%{name}-charset-arg.patch
-Patch2:		%{name}-filenr.patch
-Patch3:		%{name}-trailing-cvsinfo-slash.patch
-Patch4:		%{name}-optkb_binary_hint.patch
-Patch5:		%{name}-encode_email_personal_name.patch
-Patch6:		%{name}-cvsroot_trailing_slash.patch
-Patch7:		%{name}-mail_threading.patch
-Patch8:		%{name}-comment-ws.patch
+Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/releases/%{name}-%{version}.tar.gz
+# Source0-md5:	0afa4fbaf1c9edb27385e46337f80f4b
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
 BuildRequires:	rpmbuild(macros) >= 1.177
 Requires:	cvs
@@ -41,15 +32,6 @@ mo¿liwe, generowane s± odno¶niki do frontendów WWW do CVS i systemów
 
 %prep
 %setup -q
-%patch0 -p1
-%patch1 -p1
-%patch2 -p1
-%patch3 -p0
-%patch4 -p0
-%patch5 -p1
-%patch6 -p0
-%patch7 -p0
-%patch8 -p1
 
 %install
 rm -rf $RPM_BUILD_ROOT
@@ -69,7 +51,8 @@ rm -rf $RPM_BUILD_ROOT
 rmdir %{_libdir}/%{name} 2>/dev/null || mv -v %{_libdir}/%{name}{,.rpmsave}
 ln -s %{_datadir} %{_libdir}/%{name}
 %banner %{name} -e <<EOF
-NOTE: The cvsspam programs have been moved to %{_datadir}.
+NOTE:
+The cvsspam programs have been moved to %{_datadir}.
 I've created compat symlink so you don't feel so much pain of that.
 
 EOF
