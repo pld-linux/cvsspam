@@ -1,0 +1,78 @@
+Index: cvsspam.rb
+===================================================================
+--- cvsspam.rb	(revision 229)
++++ cvsspam.rb	(working copy)
+@@ -671,6 +671,12 @@
+   def diff(file)
+     '-&gt;'
+   end
++
++  # may be overridden by subclasses that are able to make a hyperlink to a
++  # history log for a file
++  def log(file)
++    ''
++  end
+ end
+ 
+ # Superclass for objects that can link to CVS frontends on the web (ViewCVS,
+@@ -711,6 +717,14 @@
+     "<a href=\"#{diff_url(file)}\">#{super(file)}</a>"
+   end
+ 
++  def log(file)
++    link = log_url(file)
++    if link
++      return "<span id=\"info\">(<a href=\"#{link}\">log</a>)</span>"
++    end
++    return nil
++  end
++
+  protected
+   def add_repo(url)
+     if @repository_name
+@@ -723,6 +737,10 @@
+       url
+     end
+   end
++
++  def log_url(file)
++    nil
++  end
+ end
+ 
+ # Link to ViewCVS
+@@ -781,6 +799,17 @@
+   def diff_url(file)
+     add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=text&amp;tr1=#{file.fromVer}&amp;r2=text&amp;tr2=#{file.toVer}&amp;f=h")
+   end
++
++  protected
++
++  def log_url(file)
++    if file.toVer
++      log_anchor = "#rev#{file.toVer}"
++    else
++      log_anchor = ""
++    end
++    add_repo("#{@base_url}#{urlEncode(file.path)}#{log_anchor}")
++  end
+ end
+ 
+ 
+@@ -1547,11 +1576,14 @@
+     elsif file.removal?
+       name = "<span id=\"removed\">#{name}</span>"
+     end
++    mail.print("<td>")
+     if file.has_diff?
+-      mail.print("<td><tt>#{prefix}<a href=\"#file#{file_count}\">#{name}</a></tt></td>")
++      mail.print("<tt>#{prefix}<a href=\"#file#{file_count}\">#{name}</a></tt>")
+     else
+-      mail.print("<td><tt>#{prefix}#{name}</tt></td>")
++      mail.print("<tt>#{prefix}#{name}</tt>")
+     end
++    mail.print(" #{$frontend.log(file)}")
++    mail.print("</td>")
+     if file.isEmpty
+       mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[empty]</small></td>")
+     elsif file.isBinary
