@@ -10,9 +10,9 @@ Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/releases/%{name}-%{ve
 Patch0:		%{name}-rfc2047_special_chars.patch
 Patch1:		%{name}-cvsweb_loglink.patch
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
-BuildRequires:	rpmbuild(macros) >= 1.177
+BuildRequires:	rpmbuild(macros) >= 1.277
 Requires:	cvs
-Requires:	ruby-modules
+%ruby_mod_ver_requires_eq
 BuildArch:	noarch
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
