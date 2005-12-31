@@ -12,7 +12,7 @@ Patch1:		%{name}-cvsweb_loglink.patch
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
 BuildRequires:	rpmbuild(macros) >= 1.277
 Requires:	cvs
-%ruby_mod_ver_requires_eq
+%{?ruby_mod_ver_requires_eq}
 BuildArch:	noarch
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
