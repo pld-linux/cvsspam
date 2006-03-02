@@ -38,7 +38,7 @@ Index: cvsspam.rb
 +    mod = '/'
 +    if Repository.count == 1
 +      rep = Repository.array.first
-+      mod << "#{rep.name}/#{rep.common_prefix}"
++      mod << "#{rep.common_prefix}"
 +    end
 +    mail.header("X-CVSspam-Module-Path", mod)
 +  end
