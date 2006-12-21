@@ -1,0 +1,541 @@
+--- cvsspam-0.2.12/CREDITS	2005-07-11 18:53:29.000000000 +0300
++++ cvsspam/CREDITS	2006-12-21 11:44:26.837358000 +0200
+@@ -29,3 +29,10 @@
+   Elan Ruusamäe
+   Steve Fox
+   Christopher Petro
++  Robin Getz
++  Glen Starrett
++  Jonathan Rafkind
++  Ryan Dlugosz
++  Steve Woodcock
++  Andy Selle
++  Charles Duffy
+--- cvsspam-0.2.12/collect_diffs.rb	2005-07-11 18:53:29.000000000 +0300
++++ cvsspam/collect_diffs.rb	2006-12-21 11:44:26.827358000 +0200
+@@ -27,6 +27,13 @@
+ $dirtemplate = "#cvsspam.#{Process.getpgrp}.#{Process.uid}"
+ 
+ def find_data_dir
++  if $from_address
++    safe_from = make_fromaddr_safe_for_filename($from_address)
++    Dir["#{$tmpdir}/#{$dirtemplate}.#{safe_from}-*"].each do |dir|
++      stat = File.stat(dir)
++      return dir if stat.owned?
++    end
++  end
+   Dir["#{$tmpdir}/#{$dirtemplate}-*"].each do |dir|
+     stat = File.stat(dir)
+     return dir if stat.owned?
+@@ -35,6 +42,14 @@
+ end
+ 
+ 
++# transform any special / unexpected characters appearing in the argument to
++# --from so that they will not cause problems if the value is inserted into
++# a file or directory name
++def make_fromaddr_safe_for_filename(addr)
++  addr.gsub(/[^a-zA-Z0-1.,_-]/, "_")
++end
++
++
+ def blah(msg)
+   if $debug
+     $stderr.puts "collect_diffs.rb: #{msg}"
+@@ -129,7 +144,14 @@
+   changes = Array.new
+   i = 0
+   while i < cvs_info.length
+-    changes << ChangeInfo.new(cvs_info[i], cvs_info[i+=1], cvs_info[i+=1])
++    change_file = cvs_info[i]
++    # It's been reported,
++    # http://lists.badgers-in-foil.co.uk/pipermail/cvsspam-devel/2005-September/000380.html
++    # that sometimes the second revision number that CVS gives us contains a
++    # trailing newline character, so we strip ws from these values before use,
++    change_from = cvs_info[i+=1].strip
++    change_to = cvs_info[i+=1].strip
++    changes << ChangeInfo.new(change_file, change_from, change_to)
+     i+=1
+   end
+   return changes
+@@ -222,6 +244,7 @@
+ 
+       diff_cmd = Array.new << $cvs_prog << "-nq" << "diff" << "-Nu"
+       diff_cmd << "-kk" if $diff_ignore_keywords
++      diff_cmd << "-b" if $diff_ignore_whitespace
+ 
+       if change.isAddition
+         file.write "#A "
+@@ -333,9 +356,11 @@
+ end
+ 
+ $config = nil
++$from_address = nil
+ $cvs_prog = "cvs"
+ $debug = false
+ $diff_ignore_keywords = false
++$diff_ignore_whitespace = false
+ $task_keywords = []
+ 
+ unless ENV.has_key?('CVSROOT')
+@@ -387,6 +412,7 @@
+   end
+   $config = arg if opt=="--config"
+   $debug = true if opt == "--debug"
++  $from_address = arg if opt == "--from"
+ end
+ 
+ blah("CVSROOT is #{ENV['CVSROOT']}")
+--- cvsspam-0.2.12/cvsspam-doc.xml	2005-07-11 18:53:29.000000000 +0300
++++ cvsspam/cvsspam-doc.xml	2006-12-21 11:44:26.837358000 +0200
+@@ -452,6 +452,23 @@
+ </screen></informalexample>
+       </para>
+   </section>
++
++  <section>
++    <title>RT</title>
++
++    <para>For Gforge, when a CVS log comment contains text like <userinput>Fix
++    for Bug [#123]</userinput>, or <userinput>Task [T456] ...</userinput>, the
++    text "[#123]" or "[T456]" will become a hyper-link to that Gforge page in
++    the generated email.  The format [#<replaceable>nnn</replaceable>] and
++    [T<replaceable>nnn</replaceable>] is taken from the existing plugin for
++    Gforge called cvstracker.</para>
++
++    <para>To enable, give your Gforge's URL in CVSspam's configuration file:
++<informalexample><screen>$gforgeBugURL = "http://gforge.org/tracker/index.php?func=detail&amp;aid=%s"
++$gforgeTaskURL = "http://gforge.org/pm/task.php?func=detailtask&amp;project_task_id=%s"</screen></informalexample>
++    The marker %s tells CVSspam where in the URL to put the bugId from the
++    log message.</para>
++  </section>
+ </section>
+ 
+ <section><title>CVS Web Frontends</title>
+--- cvsspam-0.2.12/cvsspam.conf	2005-07-11 18:53:30.000000000 +0300
++++ cvsspam/cvsspam.conf	2006-12-21 11:44:26.827358000 +0200
+@@ -34,11 +34,19 @@
+ #
+ #     When $jiraURL is given, text of the form 'project-1234' will be linked
+ #   to this issue in JIRA.
++#
++#     When $xplannerStoryURL, $xplannerIterationURL and $xplannerProjectURL are
++#   given, text of the form XS1234 will be linked to XPlanner stories; text of
++#   the form XI1234 will be linked to XPlanner iterations; and text of the form
++#   XP1234 will be linked to XPlanner projects.
+ 
+ #$bugzillaURL = "http://bugzilla.mozilla.org/show_bug.cgi?id=%s"
+ 
+ #$jiraURL = "http://jira.atlassian.com/secure/ViewIssue.jspa?key=%s"
+ 
++#$xplannerStoryURL = "http://www.example.com/xplanner/do/view/userstory?oid=%s"
++#$xplannerIterationURL = "http://www.example.com/xplanner/do/view/iteration?oid=%s"
++#$xplannerProjectURL = "http://www.example.com/xplanner/do/view/project?oid=%s"
+ 
+ # Link to Wiki systems
+ # 
+@@ -119,12 +127,21 @@
+ # cvsdiff keyword ignoring                  (Default: show changes in keywords)
+ #
+ #     Changes in CVS keywords can be distracting.  For instance, the
+-#   $Revision$ keyword will change on each commit.  Set this value to true
++#   $Revision$ keyword will change on each commit.  Set this value to true
+ #   to exclude changes in keyword fields (adds the -kk option to cvs diff).
+ 
+ #$diff_ignore_keywords = true
+ 
+ 
++# cvsdiff whitespace ignoring               (Default: show whitespace-only changes)
++#
++#   Whitespace-only changes can distract from the rest of a diff. Set this
++#   value to true to exclude changes in the amount of whitespace (adds the -b
++#   option to cvs diff).
++
++$diff_ignore_whitespace = true
++
++
+ # $no_removed_file_diff and $no_added_file_diff
+ #
+ #     Set both these options, and emails will only include diffs for files
+@@ -177,3 +194,13 @@
+ #   them happy, you can say $files_in_subject = true here.
+ 
+ #$files_in_subject = false
++
++
++
++# Email size limit                                        (Default: around 2MB)
++#
++#     When large changes are committed, large CVSspam emails can result.  Here
++#   you can set the size of email that CVSspam is not allowed to append any
++#   more diffs onto.  Specify the number of bytes.
++
++#$mail_size_limit = 2097152
+--- cvsspam-0.2.12/cvsspam.rb	2005-07-11 18:53:29.000000000 +0300
++++ cvsspam/cvsspam.rb	2006-12-21 17:36:44.342608880 +0200
+@@ -20,6 +20,7 @@
+ 
+ $version = "0.2.12"
+ 
++require 'time'
+ 
+ $maxSubjectLength = 200
+ $maxLinesPerDiff = 1000
+@@ -35,10 +36,6 @@
+   a<b ? a : b
+ end
+ 
+-# NB must ensure the time is UTC
+-# (the Ruby Time object's strftime() doesn't supply a numeric timezone)
+-DATE_HEADER_FORMAT = "%a, %d %b %Y %H:%M:%S +0000"
+-
+ # Perform (possibly) multiple global substitutions on a string.
+ # the regexps given as keys must not use capturing subexpressions '(...)'
+ class MultiSub
+@@ -116,6 +113,8 @@
+   UNDERSCORE = chr("_")
+   SPACE = chr(" ")
+   TAB = chr("\t")
++  HOOK = chr("?")
++  EQUALS = chr("=")
+ 
+   # encode a header value according to the RFC-2047 quoted-printable spec,
+   # allowing non-ASCII characters to appear in header values, and wrapping
+@@ -137,7 +136,7 @@
+   # return a string representing the given character-code in quoted-printable
+   # format
+   def quoted_encode_char(b)
+-    if b>126 || b==UNDERSCORE || b==TAB
++    if b>126 || b==UNDERSCORE || b==TAB || b==HOOK || b==EQUALS
+       sprintf("=%02x", b)
+     elsif b == SPACE
+       "_"
+@@ -388,6 +387,7 @@
+ class FileEntry
+   def initialize(path)
+     @path = path
++    @fromVer = @toVer = nil
+     @lineAdditions = @lineRemovals = 0
+     @repository = Repository.get(path)
+     @repository.merge_common_prefix(basedir())
+@@ -533,6 +533,14 @@
+ # TODO: consolidate these into a nicer framework,
+ mailSub = proc { |match| "<a href=\"mailto:#{match}\">#{match}</a>" }
+ urlSub = proc { |match| "<a href=\"#{match}\">#{match}</a>" }
++gforgeTaskSub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{$gforgeTaskURL.sub(/%s/, $1)}\">#{match}</a>"
++}
++gforgeBugSub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{$gforgeBugURL.sub(/%s/, $1)}\">#{match}</a>"
++}
+ bugzillaSub = proc { |match|
+   match =~ /([0-9]+)/
+   "<a href=\"#{$bugzillaURL.sub(/%s/, $1)}\">#{match}</a>"
+@@ -544,11 +552,27 @@
+   match =~ /([0-9]+)/
+   "<a href=\"#{$ticketURL.sub(/%s/, $1)}\">#{match}</a>"
+ }
++issueSub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{$issueURL.sub(/%s/, $1)}\">#{match}</a>"
++}
+ wikiSub = proc { |match| 
+-  match =~ /\[\[(.*)\]\]/
++  match =~ /\[\[(.*?)\]\]/
+   raw = $1
+   "<a href=\"#{$wikiURL.sub(/%s/, urlEncode(raw))}\">[[#{raw}]]</a>"
+ }
++xplannerIterationSub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{$xplannerIterationURL.sub(/%s/, $1)}\">#{match}</a>"
++}
++xplannerProjectSub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{$xplannerProjectURL.sub(/%s/, $1)}\">#{match}</a>"
++}
++xplannerStorySub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{$xplannerStoryURL.sub(/%s/, $1)}\">#{match}</a>"
++}
+ commentSubstitutions = {
+ 		'(?:mailto:)?[\w\.\-\+\=]+\@[\w\-]+(?:\.[\w\-]+)+\b' => mailSub,
+ 		'\b(?:http|https|ftp):[^ \t\n<>"]+[\w/]' => urlSub
+@@ -670,6 +694,12 @@
+   def diff(file)
+     '-&gt;'
+   end
++
++  # may be overridden by subclasses that are able to make a hyperlink to a
++  # history log for a file
++  def log(file)
++    ''
++  end
+ end
+ 
+ # Superclass for objects that can link to CVS frontends on the web (ViewCVS,
+@@ -710,6 +740,14 @@
+     "<a href=\"#{diff_url(file)}\">#{super(file)}</a>"
+   end
+ 
++  def log(file)
++    link = log_url(file)
++    if link
++      return "<span id=\"info\">(<a href=\"#{link}\">log</a>)</span>"
++    end
++    return nil
++  end
++
+  protected
+   def add_repo(url)
+     if @repository_name
+@@ -722,6 +760,10 @@
+       url
+     end
+   end
++
++  def log_url(file)
++    nil
++  end
+ end
+ 
+ # Link to ViewCVS
+@@ -745,6 +787,15 @@
+   def diff_url(file)
+     add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=#{file.fromVer}&amp;r2=#{file.toVer}")
+   end
++
++  def log_url(file)
++    if file.toVer
++      log_anchor = "#rev#{file.toVer}"
++    else
++      log_anchor = ""
++    end
++    add_repo("#{@base_url}#{urlEncode(file.path)}#{log_anchor}")
++  end
+ end
+ 
+ # Link to Chora, from the Horde framework
+@@ -767,9 +818,9 @@
+ class CVSwebFrontend < WebFrontend
+   def path_url(path, tag)
+     if tag == nil
+-      add_repo(@base_url + urlEncode(path))
++      add_repo(@base_url + urlEncode(path) + "/")
+     else
+-      add_repo("#{@base_url}#{urlEncode(path)}?only_with_tag=#{urlEncode(tag)}")
++      add_repo("#{@base_url}#{urlEncode(path)}/?only_with_tag=#{urlEncode(tag)}")
+     end
+   end
+ 
+@@ -780,6 +831,17 @@
+   def diff_url(file)
+     add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=text&amp;tr1=#{file.fromVer}&amp;r2=text&amp;tr2=#{file.toVer}&amp;f=h")
+   end
++
++  protected
++
++  def log_url(file)
++    if file.toVer
++      log_anchor = "#rev#{file.toVer}"
++    else
++      log_anchor = ""
++    end
++    add_repo("#{@base_url}#{urlEncode(file.path)}#{log_anchor}")
++  end
+ end
+ 
+ 
+@@ -958,7 +1020,7 @@
+     end
+     shift(nil)
+     if @truncatedLineCount>0
+-      println("<strong class=\"error\" title=\"#{@truncatedLineCount} lines truncated at column #{$maxDiffLineLength}\">[Note: Some over-long lines of diff output only partialy shown]</strong>")
++      println("<strong class=\"error\" title=\"#{@truncatedLineCount} lines truncated at column #{$maxDiffLineLength}\">[Note: Some over-long lines of diff output only partially shown]</strong>")
+     end
+   end
+ 
+@@ -1247,10 +1309,16 @@
+ $no_diff = false
+ $task_keywords = ['TODO', 'FIXME']
+ $bugzillaURL = nil
++$gforgeBugURL = nil
++$gforgeTaskURL = nil
+ $wikiURL = nil
+ $jiraURL = nil
+ $ticketURL = nil
++$issueURL = nil
+ $viewcvsURL = nil
++$xplannerIterationURL = nil
++$xplannerProjectURL = nil
++$xplannerStoryURL = nil
+ $choraURL = nil
+ $cvswebURL = nil
+ $from_address = nil
+@@ -1261,6 +1329,7 @@
+ # 2MiB limit on attached diffs,
+ $mail_size_limit = 1024 * 1024 * 2
+ $arg_charset = nil
++$cvsroot_email_header = false
+ 
+ require 'getoptlong'
+ 
+@@ -1353,7 +1422,13 @@
+ 
+ 
+ if $bugzillaURL != nil
+-  commentSubstitutions['\b[Bb][Uu][Gg]\s*#?[0-9]+'] = bugzillaSub
++  commentSubstitutions['\b[Bb]([Uu][Gg])?\s*[#:]?\s*\[?[0-9]+\]?'] = bugzillaSub
++end
++if $gforgeBugURL != nil
++  commentSubstitutions['\B\[#[0-9]+\]'] = gforgeBugSub
++end
++if $gforgeTaskURL != nil
++  commentSubstitutions['\B\[[Tt][0-9]+\]'] = gforgeTaskSub
+ end
+ if $jiraURL != nil
+   commentSubstitutions['\b[a-zA-Z]+-[0-9]+\b'] = jiraSub
+@@ -1361,9 +1436,21 @@
+ if $ticketURL != nil
+   commentSubstitutions['\b[Tt][Ii][Cc][Kk][Ee][Tt]\s*#?[0-9]+\b'] = ticketSub
+ end
++if $issueURL != nil
++  commentSubstitutions['\b[Ii][Ss][Ss][Uu][Ee]\s*#?[0-9]+\b'] = issueSub
++end
+ if $wikiURL != nil
+   commentSubstitutions['\[\[.+\]\]'] = wikiSub
+ end
++if $xplannerIterationURL != nil
++  commentSubstitutions['\bXI\[?[0-9]+\]?'] = xplannerIterationSub
++end
++if $xplannerProjectURL != nil
++  commentSubstitutions['\bXP\[?[0-9]+\]?'] = xplannerProjectSub
++end
++if $xplannerStoryURL != nil
++  commentSubstitutions['\bXS\[?[0-9]+\]?'] = xplannerStorySub
++end
+ $commentEncoder = MultiSub.new(commentSubstitutions)
+ 
+ 
+@@ -1546,11 +1633,14 @@
+     elsif file.removal?
+       name = "<span id=\"removed\">#{name}</span>"
+     end
++    mail.print("<td>")
+     if file.has_diff?
+-      mail.print("<td><tt>#{prefix}<a href=\"#file#{file_count}\">#{name}</a></tt></td>")
++      mail.print("<tt>#{prefix}<a href=\"#file#{file_count}\">#{name}</a></tt>")
+     else
+-      mail.print("<td><tt>#{prefix}#{name}</tt></td>")
++      mail.print("<tt>#{prefix}#{name}</tt>")
+     end
++    mail.print(" #{$frontend.log(file)}")
++    mail.print("</td>")
+     if file.isEmpty
+       mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[empty]</small></td>")
+     elsif file.isBinary
+@@ -1686,6 +1776,8 @@
+ # sensible header formatting, and for ensuring that the body is seperated
+ # from the message headers by a blank line (as it is required to be).
+ class MailContext
++  ENCODE_HEADERS = ["Subject", "X-CVSspam-Module-Path"]
++
+   def initialize(io)
+     @done_headers = false
+     @io = io
+@@ -1695,8 +1787,8 @@
+   # called
+   def header(name, value)
+     raise "headers already commited" if @done_headers
+-    if name == "Subject"
+-      $encoder.encode_header(@io, "Subject", value)
++    if ENCODE_HEADERS.include?(name)
++      $encoder.encode_header(@io, name, value)
+     else
+       @io.puts("#{name}: #{value}")
+     end
+@@ -1769,7 +1861,7 @@
+       ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
+       blah("Mail From: <#{from}>")
+       ctx.header("From", from.encoded) if from
+-      ctx.header("Date", Time.now.utc.strftime(DATE_HEADER_FORMAT))
++      ctx.header("Date", Time.now.rfc2822)
+       yield ctx
+     end
+   end
+@@ -1800,10 +1892,10 @@
+   return unless $fileEntries.length == 1
+   file = $fileEntries[0]
+   name = zap_header_special_chars(file.path)
+-  unless file.fromVer == "NONE"
++  if file.fromVer
+     mail.header("References", make_msg_id("#{name}.#{file.fromVer}", $hostname))
+   end
+-  unless file.toVer == "NONE"
++  if file.toVer
+     mail.header("Message-ID", make_msg_id("#{name}.#{file.toVer}", $hostname))
+   end
+ end
+@@ -1834,6 +1926,14 @@
+     end
+   end
+   mail.header("X-Mailer", "CVSspam #{$version} <http://www.badgers-in-foil.co.uk/projects/cvsspam/>")
++  if $cvsroot_email_header
++    mod = '/'
++    if Repository.count == 1
++      rep = Repository.array.first
++      mod << rep.common_prefix
++    end
++    mail.header("X-CVSspam-Module-Path", mod)
++  end
+ 
+   mail.body do |body|
+     make_html_email(body)
+--- cvsspam-0.2.12/record_lastdir.rb	2005-07-11 18:53:29.000000000 +0300
++++ cvsspam/record_lastdir.rb	2006-12-21 11:44:26.827358000 +0200
+@@ -4,7 +4,6 @@
+ #   http://www.badgers-in-foil.co.uk/projects/cvsspam/
+ # Copyright (c) David Holroyd
+ 
+-$repositorydir = ARGV.shift
+ 
+ $tmpdir = ENV["TMPDIR"] || "/tmp"
+ 
+@@ -19,6 +18,36 @@
+   nil
+ end
+ 
++
++# transform any special / unexpected characters appearing in the argument to
++# --from so that they will not cause problems if the value is inserted into
++# a file or directory name
++def make_fromaddr_safe_for_filename(addr)
++  addr.gsub(/[^a-zA-Z0-1.,_-]/, "_")
++end
++
++# Option processing doesn't use GetoptLong (for the moment) bacause arguments
++# given to this script by CVS include the names of committed files.  It
++# seems quite possible that one of those file names could begin with a '-'
++# and therefore be treated by GetoptLong as a value which requires processing.
++# This would probably result in an error.
++#
++# [That could be worked around by placing a '--' option (which tells GetoptLong
++# to stop processing option arguments) at the very end of the arguments to
++# record_lastdir.rb in commitinfo, but that's very easily forgotten, and isn't
++# really backwards compatable with the behaviour of older CVSspam releases.]
++if ARGV.first == "--from"
++  # we could, of course, be tricked, if the first committed file in the list
++  # happened to be named '--from' :S
++
++  # drop the "--from"
++  ARGV.shift
++  # and use the value which was given following the option,
++  $dirtemplate << "." << make_fromaddr_safe_for_filename(ARGV.shift)
++end
++
++$repositorydir = ARGV.shift
++
+ $datadir = find_data_dir()
+ 
+ if $datadir==nil
