@@ -1,5 +1,5 @@
 Summary:	CVSspam emails you diffs when someone commits a change to your CVS repository
-Summary(pl.UTF-8):   CVSspam - wysyłanie różnic po wykonaniu zmiany w repozytorium CVS
+Summary(pl.UTF-8):	CVSspam - wysyłanie różnic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.12
 Release:	7
