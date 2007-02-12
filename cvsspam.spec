@@ -1,5 +1,5 @@
 Summary:	CVSspam emails you diffs when someone commits a change to your CVS repository
-Summary(pl):	CVSspam - wysy≥anie rÛønic po wykonaniu zmiany w repozytorium CVS
+Summary(pl.UTF-8):   CVSspam - wysy≈Çanie r√≥≈ºnic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.12
 Release:	7
@@ -24,11 +24,11 @@ Syntax-highlighted diffs describe the changes made, and links to Web
 frontends on CVS and bug tracking systems are generated where
 possible.
 
-%description -l pl
-CVSspam wysy≥a wiadomo∂Ê po wykonaniu zmiany w repozytorium CVS.
-RÛønice z pod∂wietlaniem sk≥adni opisuj± wykonane zmiany, a je∂li to
-moøliwe, generowane s± odno∂niki do frontendÛw WWW do CVS i systemÛw
-∂ledzenia b≥ÍdÛw.
+%description -l pl.UTF-8
+CVSspam wysy≈Ça wiadomo≈õƒá po wykonaniu zmiany w repozytorium CVS.
+R√≥≈ºnice z pod≈õwietlaniem sk≈Çadni opisujƒÖ wykonane zmiany, a je≈õli to
+mo≈ºliwe, generowane sƒÖ odno≈õniki do frontend√≥w WWW do CVS i system√≥w
+≈õledzenia b≈Çƒôd√≥w.
 
 %prep
 %setup -q
