@@ -11,7 +11,7 @@ Patch0:		%{name}-users_file_charset.patch
 Patch100:	%{name}-branch.diff
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
 BuildRequires:	rpmbuild(macros) >= 1.277
-Requires:	cvs
+Requires:	cvs-client
 %{?ruby_mod_ver_requires_eq}
 BuildArch:	noarch
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
