@@ -1,0 +1,28 @@
+Index: cvsspam.rb
+===================================================================
+--- cvsspam.rb	(revision 255)
++++ cvsspam.rb	(working copy)
+@@ -936,7 +936,10 @@
+         addInfixSize = line.length - (prefixLen+suffixLen)
+         oversize_change = deleteInfixSize*100/@lineJustDeleted.length>33 || addInfixSize*100/line.length>33
+ 
+-        if prefixLen==1 && suffixLen==0 || deleteInfixSize<=0 || oversize_change
++        # avoid doing 'within-a-line highlighting' if a multibyte encoding
++        # is suspected, as all the suffix/prefix stuff above is byte, not
++        # character based
++        if multibyte_encoding? || prefixLen==1 && suffixLen==0 || deleteInfixSize<=0 || oversize_change
+           print(htmlEncode(@lineJustDeleted))
+         else
+           print(htmlEncode(@lineJustDeleted[0,prefixLen]))
+@@ -1297,6 +1300,11 @@
+   end
+ end
+ 
++# guess if the users selected encoding is multibyte, since some CVSspam code
++# isn't multibyte-safe, and needs to be disabled.
++def multibyte_encoding?
++  $charset && ["utf-8", "utf-16"].include?($charset.downcase)
++end
+ 
+ cvsroot_dir = "#{ENV['CVSROOT']}/CVSROOT"
+ $config = "#{cvsroot_dir}/cvsspam.conf"

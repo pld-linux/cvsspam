@@ -1,0 +1,616 @@
+--- ../cvsspam2/cvsspam-0.2.12/cvsspam.rb	2005-07-11 16:53:29.000000000 +0100
++++ cvsspam.rb	2007-09-21 11:08:17.000000000 +0100
+@@ -590,6 +590,42 @@
+   end
+ end
+ 
++# outputs commit log comment text supplied by LogReader as preformatted Text
++class TextCommentHandler < LineConsumer
++  def initialize
++    @lastComment = nil
++  end
++
++  def setup
++    @haveBlank = false
++    @comment = ""
++  end
++
++  def consume(line)
++    if line =~ /^\s*$/
++      @haveBlank = true
++    else
++      if @haveBlank
++        @comment += "\n"
++        @haveBlank = false
++      end
++      $mailSubject = line unless $mailSubject.length > 0
++      @comment += line += "\n"
++    end
++  end
++
++  def teardown
++    unless @comment == @lastComment
++      #println("<pre class=\"comment\">")
++      encoded = @comment
++      $commentEncoder.gsub!(encoded)
++      println(encoded)
++      #println("</pre>")
++      @lastComment = @comment
++    end
++  end
++end
++
+ 
+ # Handle lines from LogReader that represent the name of the branch tag for
+ # the next file in the log.  When files are committed to the trunk, the log
+@@ -649,6 +685,31 @@
+   end
+ end
+ 
++# Reads a line giving the path and name of the current file being considered
++# from our log of all files changed in this commit.  Subclasses make different
++# records depending on whether this commit adds, removes, or just modifies this
++# file
++class TextFileHandler < LineConsumer
++  def setTagHandler(handler)
++    @tagHandler = handler
++  end
++
++  def consume(line)
++    $file = FileEntry.new(line)
++    if $diff_output_limiter.choose_to_limit?
++      $file.has_diff = false
++    end
++    #$fileEntries << $file
++    $file.tag = getTag
++    handleFile($file)
++  end
++
++ protected
++  def getTag
++    @tagHandler.getLastTag
++  end
++end
++
+ # A do-nothing superclass for objects that know how to create hyperlinks to
+ # web CVS interfaces (e.g. CVSweb).  Subclasses overide these methods to
+ # wrap HTML link tags arround the text that this classes methods generate.
+@@ -659,6 +720,11 @@
+     htmlEncode(path)
+   end
+ 
++  # text path
++  def textpath(path, tag)
++    path
++  end
++
+   # Just returns the value of the 'version' argument.  Subclasses should change
+   # this into a link to the given version of the file.
+   def version(path, version)
+@@ -670,6 +736,11 @@
+   def diff(file)
+     '-&gt;'
+   end
++
++  # text diff
++  def textdiff(file)
++    '->'
++  end
+ end
+ 
+ # Superclass for objects that can link to CVS frontends on the web (ViewCVS,
+@@ -810,6 +881,31 @@
+   end
+ end
+ 
++# Note when LogReader finds record of a file that was added in this commit
++class TextAddedFileHandler < TextFileHandler
++  def handleFile(file)
++    file.type="A"
++    file.toVer=$toVer
++  end
++end
++
++# Note when LogReader finds record of a file that was removed in this commit
++class TextRemovedFileHandler < TextFileHandler
++  def handleFile(file)
++    file.type="R"
++    file.fromVer=$fromVer
++  end
++end
++
++# Note when LogReader finds record of a file that was modified in this commit
++class TextModifiedFileHandler < TextFileHandler
++  def handleFile(file)
++    file.type="M"
++    file.fromVer=$fromVer
++    file.toVer=$toVer
++  end
++end
++
+ 
+ # Used by UnifiedDiffHandler to record the number of added and removed lines
+ # appearing in a unidiff.
+@@ -1030,6 +1126,160 @@
+   end
+ end
+ 
++# Used by TextUnifiedDiffHandler to produce an Text
++class TextUnifiedDiffColouriser < LineConsumer
++  def initialize
++    @currentState = "@"
++    @currentStyle = "info"
++    @lineJustDeleted = nil
++    @lineJustDeletedSuperlong = false
++    @truncatedLineCount = 0
++  end
++
++  def output=(io)
++    @emailIO = io
++  end
++
++  def consume(line)
++    initial = line[0,1]
++    superlong_line = false
++    if $maxDiffLineLength && line.length > $maxDiffLineLength+1
++      line = line[0, $maxDiffLineLength+1]
++      superlong_line = true
++      @truncatedLineCount += 1
++    end
++    if initial != @currentState
++      prefixLen = 1
++      suffixLen = 0
++      if initial=="+" && @currentState=="-" && @lineJustDeleted!=nil
++        # may be an edit, try to highlight the changes part of the line
++        a = line[1,line.length-1]
++        b = @lineJustDeleted[1,@lineJustDeleted.length-1]
++        prefixLen = commonPrefixLength(a, b)+1
++        suffixLen = commonPrefixLength(a.reverse, b.reverse)
++        # prevent prefix/suffux having overlap,
++        suffixLen = min(suffixLen, min(line.length,@lineJustDeleted.length)-prefixLen)
++        deleteInfixSize = @lineJustDeleted.length - (prefixLen+suffixLen)
++        addInfixSize = line.length - (prefixLen+suffixLen)
++        oversize_change = deleteInfixSize*100/@lineJustDeleted.length>33 || addInfixSize*100/line.length>33
++
++        if prefixLen==1 && suffixLen==0 || deleteInfixSize<=0 || oversize_change
++          print(@lineJustDeleted)
++        else
++          print(@lineJustDeleted[0,prefixLen])
++          print(@lineJustDeleted[prefixLen,deleteInfixSize])
++          print(@lineJustDeleted[@lineJustDeleted.length-suffixLen,suffixLen])
++        end
++        if superlong_line
++          println("[...]")
++        else
++          println("")
++        end
++        @lineJustDeleted = nil
++      end
++      if initial=="-"
++        @lineJustDeleted=line
++        @lineJustDeletedSuperlong = superlong_line
++        shift(initial)
++        # we'll print it next time (fingers crossed)
++        return
++      elsif @lineJustDeleted!=nil
++        print(@lineJustDeleted)
++        if @lineJustDeletedSuperlong
++          println("[...]")
++        else
++          println("")
++        end
++        @lineJustDeleted = nil
++      end
++      shift(initial)
++      if prefixLen==1 && suffixLen==0 || addInfixSize<=0 || oversize_change
++        encoded = line
++      else
++        encoded = line[0,prefixLen] +
++        line[prefixLen,addInfixSize] +
++        line[line.length-suffixLen,suffixLen]
++      end
++    else
++      encoded = line
++    end
++    if initial=="-"
++      unless @lineJustDeleted==nil
++        print(@lineJustDeleted)
++        if @lineJustDeletedSuperlong
++          println("[...]")
++        else
++          println("")
++        end
++        @lineJustDeleted=nil
++      end
++    end
++    print(encoded)
++    if superlong_line
++      println("[...]")
++    else
++      println("")
++    end
++  end
++
++  def teardown
++    unless @lineJustDeleted==nil
++      print(@lineJustDeleted)
++      if @lineJustDeletedSuperlong
++        println("[...]")
++      else
++        println("")
++      end
++      @lineJustDeleted = nil
++    end
++    shift(nil)
++    if @truncatedLineCount>0
++      println("[Note: Some over-long lines of diff output only partialy shown]")
++    end
++  end
++
++  # start the diff output, using the given lines as the 'preamble' bit
++  def start_output(*lines)
++    println("--------------------------------------------------------------------------------")
++    case $file.type
++      when "A"
++        print($frontend.textpath($file.basedir, $file.tag))
++        println("\n")
++        println("#{$file.file} added at #{$frontend.version($file.path,$file.toVer)}")
++      when "R"
++        print($frontend.textpath($file.basedir, $file.tag))
++        println("\n")
++        println("#{$file.file} removed after #{$frontend.version($file.path,$file.fromVer)}")
++      when "M"
++        print($frontend.textpath($file.basedir, $file.tag))
++        println("\n")
++        println("#{$file.file} #{$frontend.version($file.path,$file.fromVer)} #{$frontend.textdiff($file)} #{$frontend.version($file.path,$file.toVer)}")
++    end
++    lines.each do |line|
++      println(line)
++    end
++  end
++
++ private
++
++  def formatChange(text)
++    return '^M' if text=="\r"
++  end
++
++  def shift(nextState)
++    @currentState = nextState
++  end
++
++  def commonPrefixLength(a, b)
++    length = 0
++    a.each_byte do |char|
++      break unless b[length]==char
++      length = length + 1
++    end
++    return length
++  end
++end
++
+ 
+ # Handle lines from LogReader that are the output from 'cvs diff -u' for the
+ # particular file under consideration
+@@ -1084,6 +1334,57 @@
+   end
+ end
+ 
++# Handle lines from LogReader that are the output from 'cvs diff -u' for the
++# particular file under consideration for Text
++class TextUnifiedDiffHandler < LineConsumer
++  def setup
++    @stats = UnifiedDiffStats.new
++    @colour = TextUnifiedDiffColouriser.new
++    @colour.output = @emailIO
++    @lookahead = nil
++  end
++
++  def consume(line)
++    case lineno()
++     when 1
++      @diffline = line
++     when 2
++      @lookahead = line
++     when 3
++      if $file.wants_diff_in_mail?
++        @colour.start_output(@diffline, @lookahead, line)
++      end
++     else
++      @stats.consume(line)
++      if $file.wants_diff_in_mail?
++        if $maxLinesPerDiff.nil? || @stats.diffLines < $maxLinesPerDiff
++          @colour.consume(line)
++        elsif @stats.diffLines == $maxLinesPerDiff
++          @colour.consume(line)
++          @colour.teardown
++        end
++      end
++    end
++  end
++
++  def teardown
++    if @lookahead == nil
++      $file.isEmpty = true
++    elsif @lookahead  =~ /Binary files .* and .* differ/
++      $file.isBinary = true
++    else
++      if $file.wants_diff_in_mail?
++        if $maxLinesPerDiff && @stats.diffLines > $maxLinesPerDiff
++          println("[truncated at #{$maxLinesPerDiff} lines; #{@stats.diffLines-$maxLinesPerDiff} more skipped]")
++        else
++          @colour.teardown
++        end
++	$file.has_diff = true
++      end
++    end
++  end
++end
++
+ 
+ # a filter that counts the number of characters output to the underlying object
+ class OutputCounter
+@@ -1381,6 +1682,18 @@
+ $handlers["R"].setTagHandler(tagHandler)
+ $handlers["M"].setTagHandler(tagHandler)
+ 
++$texthandlers = Hash[">" => TextCommentHandler.new,
++		 "U" => TextUnifiedDiffHandler.new,
++		 "T" => tagHandler,
++		 "A" => TextAddedFileHandler.new,
++		 "R" => TextRemovedFileHandler.new,
++		 "M" => TextModifiedFileHandler.new,
++		 "V" => VersionHandler.new]
++
++$texthandlers["A"].setTagHandler(tagHandler)
++$texthandlers["R"].setTagHandler(tagHandler)
++$texthandlers["M"].setTagHandler(tagHandler)
++
+ $fileEntries = Array.new
+ $task_list = Array.new
+ $allTags = Hash.new
+@@ -1403,6 +1716,24 @@
+ 
+ end
+ 
++File.open("#{$logfile}.emailtexttmp", File::RDWR|File::CREAT|File::TRUNC) do |mail|
++
++  $diff_output_limiter = OutputSizeLimiter.new(mail, $mail_size_limit)
++
++  File.open($logfile) do |log|
++    reader = LogReader.new(log)
++
++    until reader.eof
++      handler = $texthandlers[reader.currentLineCode]
++      if handler == nil
++        raise "No handler file lines marked '##{reader.currentLineCode}'"
++      end
++      handler.handleLines(reader.getLines, $diff_output_limiter)
++    end
++  end
++
++end
++
+ if $subjectPrefix == nil
+   $subjectPrefix = "[CVS #{Repository.array.join(',')}]"
+ end
+@@ -1432,7 +1763,10 @@
+ 
+ # generate the email header (and footer) having already generated the diffs
+ # for the email body to a temp file (which is simply included in the middle)
+-def make_html_email(mail)
++def make_html_email(mail, boundary)
++  mail.puts("--#{boundary}")
++  mail.puts("Content-Type: text/html;" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
++  mail.puts("Content-Disposition: inline\n\n");
+   mail.puts(<<HEAD)
+ <html>
+ <head>
+@@ -1660,7 +1994,7 @@
+   mail.puts("<center><small><a href=\"http://www.badgers-in-foil.co.uk/projects/cvsspam/\" title=\"commit -&gt; email\">CVSspam</a> #{$version}</small></center>")
+ 
+   mail.puts("</body></html>")
+-
++  mail.puts("\n\n--#{boundary}--\n\n")
+ end
+ 
+ # Tries to look up an 'alias' email address for the given string in the
+@@ -1818,11 +2152,188 @@
+ 
+ $from_address = sender_alias($from_address) unless $from_address.nil?
+ 
++def rand_string(len)
++  chars = ("a".."z").to_a + ("A".."Z").to_a + ("0".."9").to_a
++  newpass = ""
++  1.upto(len) { |i| newpass << chars[rand(chars.size-1)] }
++  return newpass
++end
++
++def make_text_email(mail, boundary)
++  mail.puts(<<HEAD)
++--#{boundary}
++Content-Type: text/plain; charset=us-ascii
++Content-Disposition: inline
++
++HEAD
++
++  haveTags = false
++  Repository.each do |repository|
++    haveTags |= repository.has_multiple_tags
++  end
++
++  filesAdded = 0
++  filesRemoved = 0
++  filesModified  = 0
++  totalLinesAdded = 0
++  totalLinesRemoved = 0
++  file_count = 0
++  lastPath = ""
++  last_repository = nil
++  $fileEntries.each do |file|
++    unless file.repository == last_repository
++      last_repository = file.repository
++      if last_repository.has_multiple_tags
++        mail.print("Mixed-tag commit")
++      else
++        mail.print("Commit")
++      end
++      mail.print(" in #{last_repository.common_prefix}")
++      if last_repository.trunk_only?
++        mail.print(" on MAIN")
++      else
++        mail.print(" on ")
++        tagCount = 0
++        last_repository.each_tag do |tag|
++          tagCount += 1
++          if tagCount > 1
++            mail.print tagCount<last_repository.tag_count ? ", " : " & "
++          end
++          mail.print tag ? tag : "MAIN"
++        end
++      end
++      mail.puts("\n")
++    end
++    file_count += 1
++    if file.addition?
++      filesAdded += 1
++    elsif file.removal?
++      filesRemoved += 1
++    elsif file.modification?
++      filesModified += 1
++    end
++    name = file.name_after_common_prefix
++    slashPos = name.rindex("/")
++    if slashPos==nil
++      prefix = ""
++    else
++      thisPath = name[0,slashPos]
++      name = name[slashPos+1,name.length]
++      if thisPath == lastPath
++        prefix = " "*(slashPos) + "/"
++      else 
++        prefix = thisPath + "/"
++      end
++      lastPath = thisPath
++    end
++    if file.addition?
++      name = "#{name}"
++    elsif file.removal?
++      name = "#{name}"
++    end
++    if file.has_diff?
++      mail.print("#{prefix}#{name} ")
++    else
++      mail.print("#{prefix}#{name} ")
++    end
++    if file.isEmpty
++      mail.print("[empty] ")
++    elsif file.isBinary
++      mail.print("[binary] ")
++    else
++      if file.lineAdditions>0
++        totalLinesAdded += file.lineAdditions
++        mail.print("+#{file.lineAdditions} ")
++      end
++      if file.lineRemovals>0
++        totalLinesRemoved += file.lineRemovals
++        mail.print("-#{file.lineRemovals} ")
++      end
++    end
++    if last_repository.has_multiple_tags
++      if file.tag
++        mail.print("#{file.tag} ")
++      else
++        mail.print("MAIN ")
++      end
++    end
++    if file.addition?
++      mail.print("added #{$frontend.version(file.path,file.toVer)} ")
++    elsif file.removal?
++      mail.print("#{$frontend.version(file.path,file.fromVer)} removed ")
++    elsif file.modification?
++      mail.print("#{$frontend.version(file.path,file.fromVer)} #{$frontend.textdiff(file)} #{$frontend.version(file.path,file.toVer)} ")
++    end
++
++    mail.puts("\n")
++  end
++  if $fileEntries.size>1 && (totalLinesAdded+totalLinesRemoved)>0
++    if totalLinesAdded>0
++      mail.print("+#{totalLinesAdded} ")
++    end
++    if totalLinesRemoved>0
++      mail.print("-#{totalLinesRemoved} ")
++    end
++    mail.puts("\n")
++  end
++  
++  totalFilesChanged = filesAdded+filesRemoved+filesModified
++  if totalFilesChanged > 1
++    changeKind = 0
++    if filesAdded>0
++      mail.print("#{filesAdded} added")
++      changeKind += 1
++    end
++    if filesRemoved>0
++      mail.print(" + ") if changeKind>0
++      mail.print("#{filesRemoved} removed")
++      changeKind += 1
++    end
++    if filesModified>0
++      mail.print(" + ") if changeKind>0
++      mail.print("#{filesModified} modified")
++      changeKind += 1
++    end
++    mail.print(", total #{totalFilesChanged}") if changeKind > 1
++    mail.puts(" files\n")
++  end
++
++  if $task_list.size > 0
++    task_count = 0
++    $task_list.each do |item|
++      task_count += 1
++      item = htmlEncode(item)
++      mail.puts("* #{item}\n")
++    end
++  end
++
++
++  File.open("#{$logfile}.emailtexttmp") do |input|
++    input.each do |line|
++      mail.puts(line.chomp)
++    end
++  end
++  if $diff_output_limiter.choose_to_limit?
++    mail.puts("[Reached #{$diff_output_limiter.written_count} bytes of diffs.")
++    mail.puts("Since the limit is about #{$mail_size_limit} bytes,")
++    mail.puts("a further #{$diff_output_limiter.total_count-$diff_output_limiter.written_count} were skipped.]")
++  end
++  if $debug
++    blah("leaving file #{$logfile}.emailtexttmp")
++  else
++    File.unlink("#{$logfile}.emailtexttmp")
++  end
++
++  mail.puts("CVSspam #{$version}")
++end
++
+ mailer.send($from_address, $recipients) do |mail|
+   mail.header("Subject", mailSubject)
+   inject_threading_headers(mail)
+   mail.header("MIME-Version", "1.0")
+-  mail.header("Content-Type", "text/html" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
++  boundary = rand_string(32)
++  mail.header("Content-Type", "multipart/alternative; boundary=\"#{boundary}\"")
++  mail.header("Content-Disposition", "inline")
+   if ENV['REMOTE_HOST']
+     # TODO: I think this will always be an IP address.  If a hostname is
+     # possible, it may need encoding of some kind,
+@@ -1836,6 +2347,7 @@
+   mail.header("X-Mailer", "CVSspam #{$version} <http://www.badgers-in-foil.co.uk/projects/cvsspam/>")
+ 
+   mail.body do |body|
+-    make_html_email(body)
++    make_text_email(body, boundary)
++    make_html_email(body, boundary)
+   end
+ end
