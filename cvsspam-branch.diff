@@ -1,18 +1,61 @@
---- cvsspam-0.2.12/CREDITS	2005-07-11 18:53:29.000000000 +0300
-+++ cvsspam/CREDITS	2006-12-21 11:44:26.837358000 +0200
-@@ -29,3 +29,10 @@
-   Elan Ruusamäe
-   Steve Fox
-   Christopher Petro
-+  Robin Getz
-+  Glen Starrett
-+  Jonathan Rafkind
-+  Ryan Dlugosz
-+  Steve Woodcock
-+  Andy Selle
-+  Charles Duffy
---- cvsspam-0.2.12/collect_diffs.rb	2005-07-11 18:53:29.000000000 +0300
-+++ cvsspam/collect_diffs.rb	2006-12-21 11:44:26.827358000 +0200
+Index: cvsspam.conf
+===================================================================
+--- cvsspam.conf	(revision 223)
++++ cvsspam.conf	(revision 253)
+@@ -34,11 +34,19 @@
+ #
+ #     When $jiraURL is given, text of the form 'project-1234' will be linked
+ #   to this issue in JIRA.
++#
++#     When $xplannerStoryURL, $xplannerIterationURL and $xplannerProjectURL are
++#   given, text of the form XS1234 will be linked to XPlanner stories; text of
++#   the form XI1234 will be linked to XPlanner iterations; and text of the form
++#   XP1234 will be linked to XPlanner projects.
+ 
+ #$bugzillaURL = "http://bugzilla.mozilla.org/show_bug.cgi?id=%s"
+ 
+ #$jiraURL = "http://jira.atlassian.com/secure/ViewIssue.jspa?key=%s"
+ 
++#$xplannerStoryURL = "http://www.example.com/xplanner/do/view/userstory?oid=%s"
++#$xplannerIterationURL = "http://www.example.com/xplanner/do/view/iteration?oid=%s"
++#$xplannerProjectURL = "http://www.example.com/xplanner/do/view/project?oid=%s"
+ 
+ # Link to Wiki systems
+ # 
+@@ -125,6 +133,15 @@
+ #$diff_ignore_keywords = true
+ 
+ 
++# cvsdiff whitespace ignoring               (Default: show whitespace-only changes)
++#
++#   Whitespace-only changes can distract from the rest of a diff. Set this
++#   value to true to exclude changes in the amount of whitespace (adds the -b
++#   option to cvs diff).
++
++$diff_ignore_whitespace = true
++
++
+ # $no_removed_file_diff and $no_added_file_diff
+ #
+ #     Set both these options, and emails will only include diffs for files
+@@ -177,3 +194,13 @@
+ #   them happy, you can say $files_in_subject = true here.
+ 
+ #$files_in_subject = false
++
++
++
++# Email size limit                                        (Default: around 2MB)
++#
++#     When large changes are committed, large CVSspam emails can result.  Here
++#   you can set the size of email that CVSspam is not allowed to append any
++#   more diffs onto.  Specify the number of bytes.
++
++#$mail_size_limit = 2097152
+Index: collect_diffs.rb
+===================================================================
+--- collect_diffs.rb	(revision 223)
++++ collect_diffs.rb	(revision 253)
 @@ -27,6 +27,13 @@
  $dirtemplate = "#cvsspam.#{Process.getpgrp}.#{Process.uid}"
  
@@ -86,8 +129,76 @@
  end
  
  blah("CVSROOT is #{ENV['CVSROOT']}")
---- cvsspam-0.2.12/cvsspam-doc.xml	2005-07-11 18:53:29.000000000 +0300
-+++ cvsspam/cvsspam-doc.xml	2006-12-21 11:44:26.837358000 +0200
+Index: record_lastdir.rb
+===================================================================
+--- record_lastdir.rb	(revision 223)
++++ record_lastdir.rb	(revision 253)
+@@ -4,7 +4,6 @@
+ #   http://www.badgers-in-foil.co.uk/projects/cvsspam/
+ # Copyright (c) David Holroyd
+ 
+-$repositorydir = ARGV.shift
+ 
+ $tmpdir = ENV["TMPDIR"] || "/tmp"
+ 
+@@ -19,6 +18,36 @@
+   nil
+ end
+ 
++
++# transform any special / unexpected characters appearing in the argument to
++# --from so that they will not cause problems if the value is inserted into
++# a file or directory name
++def make_fromaddr_safe_for_filename(addr)
++  addr.gsub(/[^a-zA-Z0-1.,_-]/, "_")
++end
++
++# Option processing doesn't use GetoptLong (for the moment) bacause arguments
++# given to this script by CVS include the names of committed files.  It
++# seems quite possible that one of those file names could begin with a '-'
++# and therefore be treated by GetoptLong as a value which requires processing.
++# This would probably result in an error.
++#
++# [That could be worked around by placing a '--' option (which tells GetoptLong
++# to stop processing option arguments) at the very end of the arguments to
++# record_lastdir.rb in commitinfo, but that's very easily forgotten, and isn't
++# really backwards compatable with the behaviour of older CVSspam releases.]
++if ARGV.first == "--from"
++  # we could, of course, be tricked, if the first committed file in the list
++  # happened to be named '--from' :S
++
++  # drop the "--from"
++  ARGV.shift
++  # and use the value which was given following the option,
++  $dirtemplate << "." << make_fromaddr_safe_for_filename(ARGV.shift)
++end
++
++$repositorydir = ARGV.shift
++
+ $datadir = find_data_dir()
+ 
+ if $datadir==nil
+Index: project.xml
+===================================================================
+Index: CREDITS
+===================================================================
+--- CREDITS	(revision 223)
++++ CREDITS	(revision 253)
+@@ -29,3 +29,10 @@
+   Elan Ruusamäe
+   Steve Fox
+   Christopher Petro
++  Robin Getz
++  Glen Starrett
++  Jonathan Rafkind
++  Ryan Dlugosz
++  Steve Woodcock
++  Andy Selle
++  Charles Duffy
+Index: cvsspam-doc.xml
+===================================================================
+--- cvsspam-doc.xml	(revision 223)
++++ cvsspam-doc.xml	(revision 253)
 @@ -452,6 +452,23 @@
  </screen></informalexample>
        </para>
@@ -112,67 +223,10 @@
  </section>
  
  <section><title>CVS Web Frontends</title>
---- cvsspam-0.2.12/cvsspam.conf	2005-07-11 18:53:30.000000000 +0300
-+++ cvsspam/cvsspam.conf	2006-12-21 11:44:26.827358000 +0200
-@@ -34,11 +34,19 @@
- #
- #     When $jiraURL is given, text of the form 'project-1234' will be linked
- #   to this issue in JIRA.
-+#
-+#     When $xplannerStoryURL, $xplannerIterationURL and $xplannerProjectURL are
-+#   given, text of the form XS1234 will be linked to XPlanner stories; text of
-+#   the form XI1234 will be linked to XPlanner iterations; and text of the form
-+#   XP1234 will be linked to XPlanner projects.
- 
- #$bugzillaURL = "http://bugzilla.mozilla.org/show_bug.cgi?id=%s"
- 
- #$jiraURL = "http://jira.atlassian.com/secure/ViewIssue.jspa?key=%s"
- 
-+#$xplannerStoryURL = "http://www.example.com/xplanner/do/view/userstory?oid=%s"
-+#$xplannerIterationURL = "http://www.example.com/xplanner/do/view/iteration?oid=%s"
-+#$xplannerProjectURL = "http://www.example.com/xplanner/do/view/project?oid=%s"
- 
- # Link to Wiki systems
- # 
-@@ -119,12 +127,21 @@
- # cvsdiff keyword ignoring                  (Default: show changes in keywords)
- #
- #     Changes in CVS keywords can be distracting.  For instance, the
--#   $Revision$ keyword will change on each commit.  Set this value to true
-+#   $Revision$ keyword will change on each commit.  Set this value to true
- #   to exclude changes in keyword fields (adds the -kk option to cvs diff).
- 
- #$diff_ignore_keywords = true
- 
- 
-+# cvsdiff whitespace ignoring               (Default: show whitespace-only changes)
-+#
-+#   Whitespace-only changes can distract from the rest of a diff. Set this
-+#   value to true to exclude changes in the amount of whitespace (adds the -b
-+#   option to cvs diff).
-+
-+$diff_ignore_whitespace = true
-+
-+
- # $no_removed_file_diff and $no_added_file_diff
- #
- #     Set both these options, and emails will only include diffs for files
-@@ -177,3 +194,13 @@
- #   them happy, you can say $files_in_subject = true here.
- 
- #$files_in_subject = false
-+
-+
-+
-+# Email size limit                                        (Default: around 2MB)
-+#
-+#     When large changes are committed, large CVSspam emails can result.  Here
-+#   you can set the size of email that CVSspam is not allowed to append any
-+#   more diffs onto.  Specify the number of bytes.
-+
-+#$mail_size_limit = 2097152
---- cvsspam-0.2.12/cvsspam.rb	2005-07-11 18:53:29.000000000 +0300
-+++ cvsspam/cvsspam.rb	2006-12-21 17:36:44.342608880 +0200
+Index: cvsspam.rb
+===================================================================
+--- cvsspam.rb	(revision 223)
++++ cvsspam.rb	(revision 253)
 @@ -20,6 +20,7 @@
  
  $version = "0.2.12"
@@ -381,22 +435,22 @@
  
  require 'getoptlong'
  
-@@ -1353,7 +1422,13 @@
+@@ -1353,17 +1422,35 @@
  
  
  if $bugzillaURL != nil
 -  commentSubstitutions['\b[Bb][Uu][Gg]\s*#?[0-9]+'] = bugzillaSub
 +  commentSubstitutions['\b[Bb]([Uu][Gg])?\s*[#:]?\s*\[?[0-9]+\]?'] = bugzillaSub
-+end
+ end
 +if $gforgeBugURL != nil
 +  commentSubstitutions['\B\[#[0-9]+\]'] = gforgeBugSub
 +end
 +if $gforgeTaskURL != nil
 +  commentSubstitutions['\B\[[Tt][0-9]+\]'] = gforgeTaskSub
- end
++end
  if $jiraURL != nil
    commentSubstitutions['\b[a-zA-Z]+-[0-9]+\b'] = jiraSub
-@@ -1361,9 +1436,21 @@
+ end
  if $ticketURL != nil
    commentSubstitutions['\b[Tt][Ii][Cc][Kk][Ee][Tt]\s*#?[0-9]+\b'] = ticketSub
  end
@@ -492,50 +546,3 @@
  
    mail.body do |body|
      make_html_email(body)
---- cvsspam-0.2.12/record_lastdir.rb	2005-07-11 18:53:29.000000000 +0300
-+++ cvsspam/record_lastdir.rb	2006-12-21 11:44:26.827358000 +0200
-@@ -4,7 +4,6 @@
- #   http://www.badgers-in-foil.co.uk/projects/cvsspam/
- # Copyright (c) David Holroyd
- 
--$repositorydir = ARGV.shift
- 
- $tmpdir = ENV["TMPDIR"] || "/tmp"
- 
-@@ -19,6 +18,36 @@
-   nil
- end
- 
-+
-+# transform any special / unexpected characters appearing in the argument to
-+# --from so that they will not cause problems if the value is inserted into
-+# a file or directory name
-+def make_fromaddr_safe_for_filename(addr)
-+  addr.gsub(/[^a-zA-Z0-1.,_-]/, "_")
-+end
-+
-+# Option processing doesn't use GetoptLong (for the moment) bacause arguments
-+# given to this script by CVS include the names of committed files.  It
-+# seems quite possible that one of those file names could begin with a '-'
-+# and therefore be treated by GetoptLong as a value which requires processing.
-+# This would probably result in an error.
-+#
-+# [That could be worked around by placing a '--' option (which tells GetoptLong
-+# to stop processing option arguments) at the very end of the arguments to
-+# record_lastdir.rb in commitinfo, but that's very easily forgotten, and isn't
-+# really backwards compatable with the behaviour of older CVSspam releases.]
-+if ARGV.first == "--from"
-+  # we could, of course, be tricked, if the first committed file in the list
-+  # happened to be named '--from' :S
-+
-+  # drop the "--from"
-+  ARGV.shift
-+  # and use the value which was given following the option,
-+  $dirtemplate << "." << make_fromaddr_safe_for_filename(ARGV.shift)
-+end
-+
-+$repositorydir = ARGV.shift
-+
- $datadir = find_data_dir()
- 
- if $datadir==nil
