@@ -1,7 +1,7 @@
 Index: cvsspam.conf
 ===================================================================
---- cvsspam.conf	(revision 223)
-+++ cvsspam.conf	(revision 253)
+--- cvsspam.conf	(.../tags/RELEASE-0_2_12)	(revision 256)
++++ cvsspam.conf	(.../trunk)	(revision 256)
 @@ -34,11 +34,19 @@
  #
  #     When $jiraURL is given, text of the form 'project-1234' will be linked
@@ -54,8 +54,8 @@ Index: cvsspam.conf
 +#$mail_size_limit = 2097152
 Index: collect_diffs.rb
 ===================================================================
---- collect_diffs.rb	(revision 223)
-+++ collect_diffs.rb	(revision 253)
+--- collect_diffs.rb	(.../tags/RELEASE-0_2_12)	(revision 256)
++++ collect_diffs.rb	(.../trunk)	(revision 256)
 @@ -27,6 +27,13 @@
  $dirtemplate = "#cvsspam.#{Process.getpgrp}.#{Process.uid}"
  
@@ -131,8 +131,8 @@ Index: collect_diffs.rb
  blah("CVSROOT is #{ENV['CVSROOT']}")
 Index: record_lastdir.rb
 ===================================================================
---- record_lastdir.rb	(revision 223)
-+++ record_lastdir.rb	(revision 253)
+--- record_lastdir.rb	(.../tags/RELEASE-0_2_12)	(revision 256)
++++ record_lastdir.rb	(.../trunk)	(revision 256)
 @@ -4,7 +4,6 @@
  #   http://www.badgers-in-foil.co.uk/projects/cvsspam/
  # Copyright (c) David Holroyd
@@ -182,8 +182,8 @@ Index: project.xml
 ===================================================================
 Index: CREDITS
 ===================================================================
---- CREDITS	(revision 223)
-+++ CREDITS	(revision 253)
+--- CREDITS	(.../tags/RELEASE-0_2_12)	(revision 256)
++++ CREDITS	(.../trunk)	(revision 256)
 @@ -29,3 +29,10 @@
    Elan Ruusamäe
    Steve Fox
@@ -197,8 +197,8 @@ Index: CREDITS
 +  Charles Duffy
 Index: cvsspam-doc.xml
 ===================================================================
---- cvsspam-doc.xml	(revision 223)
-+++ cvsspam-doc.xml	(revision 253)
+--- cvsspam-doc.xml	(.../tags/RELEASE-0_2_12)	(revision 256)
++++ cvsspam-doc.xml	(.../trunk)	(revision 256)
 @@ -452,6 +452,23 @@
  </screen></informalexample>
        </para>
@@ -225,8 +225,8 @@ Index: cvsspam-doc.xml
  <section><title>CVS Web Frontends</title>
 Index: cvsspam.rb
 ===================================================================
---- cvsspam.rb	(revision 223)
-+++ cvsspam.rb	(revision 253)
+--- cvsspam.rb	(.../tags/RELEASE-0_2_12)	(revision 256)
++++ cvsspam.rb	(.../trunk)	(revision 256)
 @@ -20,6 +20,7 @@
  
  $version = "0.2.12"
@@ -246,6 +246,15 @@ Index: cvsspam.rb
  # Perform (possibly) multiple global substitutions on a string.
  # the regexps given as keys must not use capturing subexpressions '(...)'
  class MultiSub
+@@ -48,7 +45,7 @@
+     @mash = Array.new
+     expr = nil
+     hash.each do |key,val|
+-      if expr == nil ; expr="(" else expr<<"|(" end
++      if expr == nil ; expr="(" else expr << "|(" end
+       expr << key << ")"
+       @mash << val
+     end
 @@ -116,6 +113,8 @@
    UNDERSCORE = chr("_")
    SPACE = chr(" ")
@@ -264,7 +273,19 @@ Index: cvsspam.rb
        sprintf("=%02x", b)
      elsif b == SPACE
        "_"
-@@ -388,6 +387,7 @@
+@@ -163,8 +162,9 @@
+ 
+   # gives a string starting "=?", and including a charset specification, that
+   # marks the start of a quoted-printable character sequence
+-  def marker_start_quoted
+-    "=?#{@charset}?#{@encoding}?"
++  def marker_start_quoted(charset=nil)
++    charset = @charset if charset.nil?
++    "=?#{charset}?#{@encoding}?"
+   end
+ 
+   # test to see of the given string contains non-ASCII characters
+@@ -388,6 +388,7 @@
  class FileEntry
    def initialize(path)
      @path = path
@@ -272,7 +293,7 @@ Index: cvsspam.rb
      @lineAdditions = @lineRemovals = 0
      @repository = Repository.get(path)
      @repository.merge_common_prefix(basedir())
-@@ -533,6 +533,14 @@
+@@ -533,6 +534,14 @@
  # TODO: consolidate these into a nicer framework,
  mailSub = proc { |match| "<a href=\"mailto:#{match}\">#{match}</a>" }
  urlSub = proc { |match| "<a href=\"#{match}\">#{match}</a>" }
@@ -287,7 +308,7 @@ Index: cvsspam.rb
  bugzillaSub = proc { |match|
    match =~ /([0-9]+)/
    "<a href=\"#{$bugzillaURL.sub(/%s/, $1)}\">#{match}</a>"
-@@ -544,11 +552,27 @@
+@@ -544,11 +553,27 @@
    match =~ /([0-9]+)/
    "<a href=\"#{$ticketURL.sub(/%s/, $1)}\">#{match}</a>"
  }
@@ -316,7 +337,7 @@ Index: cvsspam.rb
  commentSubstitutions = {
  		'(?:mailto:)?[\w\.\-\+\=]+\@[\w\-]+(?:\.[\w\-]+)+\b' => mailSub,
  		'\b(?:http|https|ftp):[^ \t\n<>"]+[\w/]' => urlSub
-@@ -670,6 +694,12 @@
+@@ -670,6 +695,12 @@
    def diff(file)
      '-&gt;'
    end
@@ -329,7 +350,7 @@ Index: cvsspam.rb
  end
  
  # Superclass for objects that can link to CVS frontends on the web (ViewCVS,
-@@ -710,6 +740,14 @@
+@@ -710,6 +741,14 @@
      "<a href=\"#{diff_url(file)}\">#{super(file)}</a>"
    end
  
@@ -344,7 +365,7 @@ Index: cvsspam.rb
   protected
    def add_repo(url)
      if @repository_name
-@@ -722,6 +760,10 @@
+@@ -722,6 +761,10 @@
        url
      end
    end
@@ -355,7 +376,7 @@ Index: cvsspam.rb
  end
  
  # Link to ViewCVS
-@@ -745,6 +787,15 @@
+@@ -745,6 +788,15 @@
    def diff_url(file)
      add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=#{file.fromVer}&amp;r2=#{file.toVer}")
    end
@@ -371,7 +392,7 @@ Index: cvsspam.rb
  end
  
  # Link to Chora, from the Horde framework
-@@ -767,9 +818,9 @@
+@@ -767,9 +819,9 @@
  class CVSwebFrontend < WebFrontend
    def path_url(path, tag)
      if tag == nil
@@ -383,7 +404,7 @@ Index: cvsspam.rb
      end
    end
  
-@@ -780,6 +831,17 @@
+@@ -780,6 +832,17 @@
    def diff_url(file)
      add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=text&amp;tr1=#{file.fromVer}&amp;r2=text&amp;tr2=#{file.toVer}&amp;f=h")
    end
@@ -401,7 +422,7 @@ Index: cvsspam.rb
  end
  
  
-@@ -958,7 +1020,7 @@
+@@ -958,7 +1021,7 @@
      end
      shift(nil)
      if @truncatedLineCount>0
@@ -410,7 +431,45 @@ Index: cvsspam.rb
      end
    end
  
-@@ -1247,10 +1309,16 @@
+@@ -1181,7 +1244,7 @@
+ 
+ # an RFC 822 email address
+ class EmailAddress
+-  def initialize(text)
++  def initialize(text, charset=nil)
+     if text =~ /^\s*([^<]+?)\s*<\s*([^>]+?)\s*>\s*$/
+       @personal_name = $1
+       @address = $2
+@@ -1189,9 +1252,10 @@
+       @personal_name = nil
+       @address = text
+     end
++    @charset=charset
+   end
+ 
+-  attr_accessor :personal_name, :address
++  attr_accessor :personal_name, :address, :charset
+ 
+   def has_personal_name?
+     return !@personal_name.nil?
+@@ -1222,7 +1286,7 @@
+   # rfc2047 encode the word, if it contains non-ASCII characters
+   def encode_word(word)
+     if $encoder.requires_rfc2047?(word)
+-      encoded = $encoder.marker_start_quoted
++      encoded = $encoder.marker_start_quoted(@charset)
+       $encoder.each_char_encoded(word) do |code|
+ 	encoded << code
+       end
+@@ -1237,6 +1301,7 @@
+ cvsroot_dir = "#{ENV['CVSROOT']}/CVSROOT"
+ $config = "#{cvsroot_dir}/cvsspam.conf"
+ $users_file = "#{cvsroot_dir}/users"
++$users_file_charset = nil
+ 
+ $debug = false
+ $recipients = Array.new
+@@ -1247,10 +1312,16 @@
  $no_diff = false
  $task_keywords = ['TODO', 'FIXME']
  $bugzillaURL = nil
@@ -427,7 +486,7 @@ Index: cvsspam.rb
  $choraURL = nil
  $cvswebURL = nil
  $from_address = nil
-@@ -1261,6 +1329,7 @@
+@@ -1261,6 +1332,7 @@
  # 2MiB limit on attached diffs,
  $mail_size_limit = 1024 * 1024 * 2
  $arg_charset = nil
@@ -435,7 +494,7 @@ Index: cvsspam.rb
  
  require 'getoptlong'
  
-@@ -1353,17 +1422,35 @@
+@@ -1353,17 +1425,35 @@
  
  
  if $bugzillaURL != nil
@@ -472,7 +531,7 @@ Index: cvsspam.rb
  $commentEncoder = MultiSub.new(commentSubstitutions)
  
  
-@@ -1546,11 +1633,14 @@
+@@ -1546,11 +1636,14 @@
      elsif file.removal?
        name = "<span id=\"removed\">#{name}</span>"
      end
@@ -489,7 +548,16 @@ Index: cvsspam.rb
      if file.isEmpty
        mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[empty]</small></td>")
      elsif file.isBinary
-@@ -1686,6 +1776,8 @@
+@@ -1672,7 +1765,7 @@
+       io.each_line do |line|
+         if line =~ /^([^:]+)\s*:\s*(['"]?)([^\n\r]+)(\2)/
+           if email.address == $1
+-            return EmailAddress.new($3)
++            return EmailAddress.new($3, $users_file_charset)
+           end
+         end
+       end
+@@ -1686,6 +1779,8 @@
  # sensible header formatting, and for ensuring that the body is seperated
  # from the message headers by a blank line (as it is required to be).
  class MailContext
@@ -498,7 +566,7 @@ Index: cvsspam.rb
    def initialize(io)
      @done_headers = false
      @io = io
-@@ -1695,8 +1787,8 @@
+@@ -1695,8 +1790,8 @@
    # called
    def header(name, value)
      raise "headers already commited" if @done_headers
@@ -509,7 +577,7 @@ Index: cvsspam.rb
      else
        @io.puts("#{name}: #{value}")
      end
-@@ -1769,7 +1861,7 @@
+@@ -1769,7 +1864,7 @@
        ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
        blah("Mail From: <#{from}>")
        ctx.header("From", from.encoded) if from
@@ -518,7 +586,7 @@ Index: cvsspam.rb
        yield ctx
      end
    end
-@@ -1800,10 +1892,10 @@
+@@ -1800,10 +1895,10 @@
    return unless $fileEntries.length == 1
    file = $fileEntries[0]
    name = zap_header_special_chars(file.path)
@@ -531,7 +599,7 @@ Index: cvsspam.rb
      mail.header("Message-ID", make_msg_id("#{name}.#{file.toVer}", $hostname))
    end
  end
-@@ -1834,6 +1926,14 @@
+@@ -1834,6 +1929,14 @@
      end
    end
    mail.header("X-Mailer", "CVSspam #{$version} <http://www.badgers-in-foil.co.uk/projects/cvsspam/>")
