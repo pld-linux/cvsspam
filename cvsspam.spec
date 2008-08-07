@@ -7,10 +7,9 @@ License:	GPL
 Group:		Applications/System
 Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/releases/%{name}-%{version}.tar.gz
 # Source0-md5:	0afa4fbaf1c9edb27385e46337f80f4b
-Patch0:		%{name}-users_file_charset.patch
-Patch1:		%{name}-multibyte_enc_disables_highlight-patch1.diff
-Patch2:		%{name}-textdiff.patch
 Patch100:	%{name}-branch.diff
+Patch0:		%{name}-multibyte_enc_disables_highlight-patch1.diff
+Patch1:		%{name}-textdiff.patch
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
 BuildRequires:	rpmbuild(macros) >= 1.277
 Requires:	cvs-client
@@ -36,10 +35,9 @@ możliwe, generowane są odnośniki do frontendów WWW do CVS i systemów
 
 %prep
 %setup -q
-%patch100 -p1
+%patch100 -p0
 %patch0 -p0
 %patch1 -p0
-%patch2 -p0
 
 %install
 rm -rf $RPM_BUILD_ROOT
