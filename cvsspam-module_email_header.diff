@@ -1,0 +1,47 @@
+Index: cvsspam.rb
+===================================================================
+--- cvsspam.rb	(revision 231)
++++ cvsspam.rb	(working copy)
+@@ -1301,6 +1301,7 @@
+ # 2MiB limit on attached diffs,
+ $mail_size_limit = 1024 * 1024 * 2
+ $arg_charset = nil
++$cvsroot_email_header = false
+ 
+ require 'getoptlong'
+ 
+@@ -1735,6 +1736,8 @@
+ # sensible header formatting, and for ensuring that the body is seperated
+ # from the message headers by a blank line (as it is required to be).
+ class MailContext
++  ENCODE_HEADERS = ["Subject", "X-CVSspam-Module-Path"]
++
+   def initialize(io)
+     @done_headers = false
+     @io = io
+@@ -1744,8 +1747,8 @@
+   # called
+   def header(name, value)
+     raise "headers already commited" if @done_headers
+-    if name == "Subject"
+-      $encoder.encode_header(@io, "Subject", value)
++    if ENCODE_HEADERS.include?(name)
++      $encoder.encode_header(@io, name, value)
+     else
+       @io.puts("#{name}: #{value}")
+     end
+@@ -1883,6 +1886,14 @@
+     end
+   end
+   mail.header("X-Mailer", "CVSspam #{$version} <http://www.badgers-in-foil.co.uk/projects/cvsspam/>")
++  if $cvsroot_email_header
++    mod = '/'
++    if Repository.count == 1
++      rep = Repository.array.first
++      mod << "#{rep.common_prefix}"
++    end
++    mail.header("X-CVSspam-Module-Path", mod)
++  end
+ 
+   mail.body do |body|
+     make_html_email(body)

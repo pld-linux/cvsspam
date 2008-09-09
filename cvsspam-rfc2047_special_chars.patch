@@ -1,0 +1,20 @@
+--- cvsspam.rb	2005-07-26 17:17:23.000000000 +0100
++++ cvsspam.rb-fix	2005-07-26 17:17:18.000000000 +0100
+@@ -116,6 +116,8 @@
+   UNDERSCORE = chr("_")
+   SPACE = chr(" ")
+   TAB = chr("\t")
++  HOOK = chr("?")
++  EQUALS = chr("=")
+ 
+   # encode a header value according to the RFC-2047 quoted-printable spec,
+   # allowing non-ASCII characters to appear in header values, and wrapping
+@@ -137,7 +139,7 @@
+   # return a string representing the given character-code in quoted-printable
+   # format
+   def quoted_encode_char(b)
+-    if b>126 || b==UNDERSCORE || b==TAB
++    if b>126 || b==UNDERSCORE || b==TAB || b==HOOK || b==EQUALS
+       sprintf("=%02x", b)
+     elsif b == SPACE
+       "_"
