@@ -8,6 +8,7 @@ Group:		Applications/System
 Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/releases/%{name}-%{version}.tar.gz
 # Source0-md5:	0afa4fbaf1c9edb27385e46337f80f4b
 Patch100:	%{name}-branch.diff
+Patch101:	%{name}-svnspam-branch.diff
 Patch0:		%{name}-multibyte_enc_disables_highlight-patch1.diff
 Patch1:		%{name}-textdiff.patch
 Patch2:		%{name}-rfc2045.patch
@@ -37,6 +38,7 @@ możliwe, generowane są odnośniki do frontendów WWW do CVS i systemów
 %prep
 %setup -q
 %patch100 -p0
+%patch101 -p1
 %patch0 -p0
 %patch1 -p0
 %patch2 -p1
