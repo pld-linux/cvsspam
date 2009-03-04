@@ -12,6 +12,7 @@ Patch101:	%{name}-svnspam-branch.diff
 Patch0:		%{name}-multibyte_enc_disables_highlight-patch1.diff
 Patch1:		%{name}-textdiff.patch
 Patch2:		%{name}-rfc2045.patch
+Patch3:		%{name}-trac.patch
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
 BuildRequires:	rpmbuild(macros) >= 1.277
 Requires:	cvs-client
@@ -42,6 +43,7 @@ możliwe, generowane są odnośniki do frontendów WWW do CVS i systemów
 %patch0 -p0
 %patch1 -p0
 %patch2 -p1
+%patch3 -p1
 
 %install
 rm -rf $RPM_BUILD_ROOT
