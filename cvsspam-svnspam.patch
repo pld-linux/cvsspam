@@ -1,14 +1,5 @@
 --- cvsspam-0.2.12/svn_post_commit_hook.rb~	2005-07-11 18:53:29.000000000 +0300
 +++ cvsspam-0.2.12/svn_post_commit_hook.rb	2009-03-04 22:02:47.244474437 +0200
-@@ -12,7 +13,7 @@
- $tmpdir = ENV["TMPDIR"] || "/tmp"
- $dirtemplate = "#svnspam.#{Process.getpgrp}.#{Process.uid}"
- # arguments to pass though to 'cvsspam.rb'
--$passthrough_args = []
-+$passthrough_args = ['--svn']
- 
- def make_data_dir
-   dir = "#{$tmpdir}/#{$dirtemplate}-#{rand(99999999)}"
 @@ -28,8 +29,10 @@
  end
  
