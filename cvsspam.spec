@@ -2,7 +2,7 @@ Summary:	CVSspam emails you diffs when someone commits a change to your CVS repo
 Summary(pl.UTF-8):	CVSspam - wysyłanie różnic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.12
-Release:	11
+Release:	11.1
 License:	GPL
 Group:		Applications/System
 Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/releases/%{name}-%{version}.tar.gz
@@ -13,6 +13,7 @@ Patch0:		%{name}-multibyte_enc_disables_highlight-patch1.diff
 Patch1:		%{name}-textdiff.patch
 Patch2:		%{name}-rfc2045.patch
 Patch3:		%{name}-trac.patch
+Patch4:		%{name}-svnspam.patch
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
 BuildRequires:	rpmbuild(macros) >= 1.277
 Requires:	cvs-client
@@ -44,6 +45,7 @@ możliwe, generowane są odnośniki do frontendów WWW do CVS i systemów
 %patch1 -p0
 %patch2 -p1
 %patch3 -p1
+%patch4 -p1
 
 %install
 rm -rf $RPM_BUILD_ROOT
@@ -51,6 +53,9 @@ install -d $RPM_BUILD_ROOT{%{_libdir},%{_datadir},%{_sysconfdir}}
 
 install {collect_diffs,cvsspam,record_lastdir}.rb $RPM_BUILD_ROOT%{_datadir}
 install cvsspam.conf $RPM_BUILD_ROOT%{_sysconfdir}
+
+# svn part
+install {svn_post_commit_hook,svn_cvsspam}.rb $RPM_BUILD_ROOT%{_datadir}
 
 ln -s %{_datadir} $RPM_BUILD_ROOT%{_libdir}/%{name}
 
@@ -72,8 +77,9 @@ EOF
 %files
 %defattr(644,root,root,755)
 %doc CREDITS TODO cvsspam-doc.pdf cvsspam-doc.html
-%dir %{_datadir}
-%attr(755,root,root) %{_datadir}/*
-%ghost %{_libdir}/%{name}
 %dir %{_sysconfdir}
-%config(noreplace) %verify(not md5 mtime size) %{_sysconfdir}/*
+%config(noreplace) %verify(not md5 mtime size) %{_sysconfdir}/cvsspam.conf
+%dir %{_datadir}
+%attr(755,root,root) %{_datadir}/*.rb
+
+%ghost %{_libdir}/%{name}
