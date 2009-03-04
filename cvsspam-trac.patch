@@ -50,3 +50,13 @@
  else
    $frontend = NoFrontend.new
  end
+--- cvsspam-0.2.12/cvsspam.conf~	2009-03-04 21:49:48.424573794 +0200
++++ cvsspam-0.2.12/cvsspam.conf	2009-03-04 21:33:16.436106000 +0200
+@@ -79,6 +79,7 @@
+ 
+ #$cvswebURL = "http://localhost/cgi-bin/cvsweb.cgi"
+ 
++#$tracURL = "http://localhost/trac/myproject"
+ 
+ 
+ # Additional SMTP Headers                                            (Optional)
