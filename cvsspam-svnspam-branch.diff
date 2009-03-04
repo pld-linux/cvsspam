@@ -1,0 +1,591 @@
+--- cvsspam-0.2.12/svn_cvsspam.rb	2005-07-11 18:53:29.000000000 +0300
++++ cvsspam-svn/svn_cvsspam.rb	2008-08-07 17:27:52.632725455 +0300
+@@ -18,7 +18,7 @@
+ # to your cvssppam.conf
+ 
+ 
+-$version = "0.2.11"
++$version = "0.2.12"
+ 
+ 
+ $maxSubjectLength = 200
+@@ -339,8 +339,11 @@
+ 
+   # gets the Repository object for the first component of the given path
+   def Repository.get(name)
+-    name =~ /^[^\/]+/
+-    name = $&
++    # Leading './' is ignored (for peeps who have done 'cvs checkout .')
++    # Trailing '/' ensures no match for files in root (we just want dirs)
++    name =~ /^(?:\.\/)?([^\/]+)\//  
++    name = $1
++    name = "/" if name.nil?  # file at top-level?  fake up a name for repo
+     rep = @@repositories[name]
+     if rep.nil?
+       rep =  Repository.new(name)
+@@ -385,6 +388,7 @@
+ class FileEntry
+   def initialize(path)
+     @path = path
++    @fromVer = @toVer = nil
+     @lineAdditions = @lineRemovals = 0
+     @repository = Repository.get(path)
+     @repository.merge_common_prefix(basedir())
+@@ -394,7 +398,7 @@
+ 
+   # the full path and filename within the repository
+   attr_accessor :path
+-  # the type of change committed 'M'=modified, 'A'=added, 'R'=removed
++  # the type of change committed 'M'=modified, 'A'=added, 'R'=removed, 'P'=properties, 'C'=copied
+   attr_accessor :type
+   # records number of 'addition' lines in diff output, once counted
+   attr_accessor :lineAdditions
+@@ -412,7 +416,7 @@
+   # works out the filename part of #path
+   def file
+     @path =~ /.*\/(.*)/
+-    $1 || @path
++    $1
+   end
+ 
+   # set the branch on which this change was committed, and add it to the list
+@@ -430,7 +434,7 @@
+   # works out the directory part of #path
+   def basedir
+     @path =~ /(.*)\/.*/
+-    $1 || "/"
++    $1
+   end
+ 
+   # gives the Repository object this file was automatically associated with
+@@ -449,16 +453,27 @@
+   def removal?
+     @type == "R"
+   end
+-
++  
+   # was this file added during the commit?
+   def addition?
+     @type == "A"
+   end
+ 
++  # was this file copied during the commit?
++  def copied?
++    @type == "C"
++  end
++
+   # was this file simply modified during the commit?
+   def modification?
+     @type == "M"
+   end
++  
++  # was this file simply modified during the commit?
++  def modifiedprops?
++    @type == "P"
++  end
++
+ 
+   # passing true, this object remembers that a diff will appear in the email,
+   # passing false, this object remembers that no diff will appear in the email.
+@@ -530,6 +545,14 @@
+ # TODO: consolidate these into a nicer framework,
+ mailSub = proc { |match| "<a href=\"mailto:#{match}\">#{match}</a>" }
+ urlSub = proc { |match| "<a href=\"#{match}\">#{match}</a>" }
++gforgeTaskSub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{$gforgeTaskURL.sub(/%s/, $1)}\">#{match}</a>"
++}
++gforgeBugSub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{$gforgeBugURL.sub(/%s/, $1)}\">#{match}</a>"
++}
+ bugzillaSub = proc { |match|
+   match =~ /([0-9]+)/
+   "<a href=\"#{$bugzillaURL.sub(/%s/, $1)}\">#{match}</a>"
+@@ -541,9 +564,15 @@
+   match =~ /([0-9]+)/
+   "<a href=\"#{$ticketURL.sub(/%s/, $1)}\">#{match}</a>"
+ }
++wikiSub = proc { |match| 
++  match =~ /\[\[(.*)\]\]/
++  raw = $1
++  "<a href=\"#{$wikiURL.sub(/%s/, urlEncode(raw))}\">[[#{raw}]]</a>"
++}
+ commentSubstitutions = {
+ 		'(?:mailto:)?[\w\.\-\+\=]+\@[\w\-]+(?:\.[\w\-]+)+\b' => mailSub,
+-		'\b(?:http|https|ftp):[^ \t\n<>"]+[\w/]' => urlSub}
++		'\b(?:http|https|ftp):[^ \t\n<>"]+[\w/]' => urlSub
++		}
+ 
+ # outputs commit log comment text supplied by LogReader as preformatted HTML
+ class CommentHandler < LineConsumer
+@@ -661,6 +690,12 @@
+   def diff(file)
+     '-&gt;'
+   end
++
++  # may be overridden by subclasses that are able to make a hyperlink to a
++  # history log for a file
++  def log(file)
++    ''
++  end
+ end
+ 
+ # Superclass for objects that can link to CVS frontends on the web (ViewCVS,
+@@ -701,6 +736,14 @@
+     "<a href=\"#{diff_url(file)}\">#{super(file)}</a>"
+   end
+ 
++  def log(file)
++    link = log_url(file)
++    if link
++      return "<span id=\"info\">(<a href=\"#{link}\">log</a>)</span>"
++    end
++    return nil
++  end
++
+  protected
+   def add_repo(url)
+     if @repository_name
+@@ -713,6 +756,10 @@
+       url
+     end
+   end
++
++  def log_url(file)
++    nil
++  end
+ end
+ 
+ # Link to ViewCVS
+@@ -771,6 +818,17 @@
+   def diff_url(file)
+     add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=text&amp;tr1=#{file.fromVer}&amp;r2=text&amp;tr2=#{file.toVer}&amp;f=h")
+   end
++
++  protected
++
++  def log_url(file)
++    if file.toVer
++      log_anchor = "#rev#{file.toVer}"
++    else
++      log_anchor = ""
++    end
++    add_repo("#{@base_url}#{urlEncode(file.path)}#{log_anchor}")
++  end
+ end
+ 
+ 
+@@ -792,6 +850,15 @@
+   end
+ end
+ 
++# Note when LogReader finds record of a file that was copied in this commit
++class CopiedFileHandler < FileHandler
++  def handleFile(file)
++    file.type="C"
++    file.fromVer=$fromVer
++    file.toVer=$toVer
++  end
++end
++
+ # Note when LogReader finds record of a file that was modified in this commit
+ class ModifiedFileHandler < FileHandler
+   def handleFile(file)
+@@ -801,6 +868,15 @@
+   end
+ end
+ 
++# Note when LogReader finds record of a file whose properties were modified in this commit
++class ModifiedPropsFileHandler < FileHandler
++  def handleFile(file)
++    file.type="P"
++    file.fromVer=$fromVer
++    file.toVer=$toVer
++  end
++end
++
+ 
+ # Used by UnifiedDiffHandler to record the number of added and removed lines
+ # appearing in a unidiff.
+@@ -967,11 +1043,21 @@
+         print($frontend.path($file.basedir, $file.tag))
+         println("</span><br />")
+         println("<div class=\"fileheader\" id=\"removed\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">removed after #{$frontend.version($file.path,$file.fromVer)}</small></div>")
++      when "C"
++        print("<span class=\"pathname\" id=\"copied\">")
++        print($frontend.path($file.basedir, $file.tag))
++        println("</span><br />")
++        println("<div class=\"fileheader\" id=\"copied\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">copied from #{$frontend.version($file.path,$file.fromVer)}</small></div>")
+       when "M"
+         print("<span class=\"pathname\">")
+         print($frontend.path($file.basedir, $file.tag))
+         println("</span><br />")
+         println("<div class=\"fileheader\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">#{$frontend.version($file.path,$file.fromVer)} #{$frontend.diff($file)} #{$frontend.version($file.path,$file.toVer)}</small></div>")
++      when "P"
++        print("<span class=\"pathname\">")
++        print($frontend.path($file.basedir, $file.tag))
++        println("</span><br />")
++        println("<div class=\"fileheader\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">#{$frontend.version($file.path,$file.fromVer)} #{$frontend.diff($file)} #{$frontend.version($file.path,$file.toVer)}</small></div>")
+     end
+     print("<pre class=\"diff\"><small id=\"info\">")
+     lines.each do |line|
+@@ -1045,7 +1131,7 @@
+      else
+       @stats.consume(line)
+       if $file.wants_diff_in_mail?
+-        if @stats.diffLines < $maxLinesPerDiff
++        if $maxLinesPerDiff.nil? || @stats.diffLines < $maxLinesPerDiff
+           @colour.consume(line)
+         elsif @stats.diffLines == $maxLinesPerDiff
+           @colour.consume(line)
+@@ -1062,7 +1148,7 @@
+       $file.isBinary = true
+     else
+       if $file.wants_diff_in_mail?
+-        if @stats.diffLines > $maxLinesPerDiff
++        if $maxLinesPerDiff && @stats.diffLines > $maxLinesPerDiff
+           println("</pre>")
+           println("<strong class=\"error\">[truncated at #{$maxLinesPerDiff} lines; #{@stats.diffLines-$maxLinesPerDiff} more skipped]</strong>")
+         else
+@@ -1230,13 +1316,18 @@
+ $users_file = "#{cvsroot_dir}/users"
+ 
+ $debug = false
++$svn = false
+ $recipients = Array.new
+ $sendmail_prog = "/usr/sbin/sendmail"
++$hostname = ENV['HOSTNAME'] || 'localhost'
+ $no_removed_file_diff = false
+ $no_added_file_diff = false
+ $no_diff = false
+-$task_keywords = ['TODO', 'FIXME']
++$task_keywords = ['TODO', 'FIXME', 'FIXIT', 'todo']
+ $bugzillaURL = nil
++$gforgeBugURL = nil
++$gforgeTaskURL = nil
++$wikiURL = nil
+ $jiraURL = nil
+ $ticketURL = nil
+ $viewcvsURL = nil
+@@ -1257,6 +1348,7 @@
+   [ "--to",     "-t", GetoptLong::REQUIRED_ARGUMENT ],
+   [ "--config", "-c", GetoptLong::REQUIRED_ARGUMENT ],
+   [ "--debug",  "-d", GetoptLong::NO_ARGUMENT ],
++  [ "--svn",    "-s", GetoptLong::NO_ARGUMENT ],
+   [ "--from",   "-u", GetoptLong::REQUIRED_ARGUMENT ],
+   [ "--charset",      GetoptLong::REQUIRED_ARGUMENT ]
+ )
+@@ -1265,6 +1357,7 @@
+   $recipients << EmailAddress.new(arg) if opt=="--to"
+   $config = arg if opt=="--config"
+   $debug = true if opt=="--debug"
++  $svn = true if opt=="--svn"
+   $from_address = EmailAddress.new(arg) if opt=="--from"
+   # must use different variable as the config is readed later.
+   $arg_charset = arg if opt == "--charset"
+@@ -1277,12 +1370,13 @@
+   else
+     $stderr.puts "missing required file argument"
+   end
+-  puts "Usage: cvsspam.rb [ --to <email> ] [ --config <file> ] <collect_diffs file>"
++  puts "Usage: cvsspam.rb [ --svn ] [ --to <email> ] [ --config <file> ] <collect_diffs file>"
+   exit(-1)
+ end
+ 
+ $logfile = ARGV[0]
+ 
++
+ $additionalHeaders = Array.new
+ $problemHeaders = Array.new
+ 
+@@ -1343,12 +1437,21 @@
+ if $bugzillaURL != nil
+   commentSubstitutions['\b[Bb][Uu][Gg]\s*#?[0-9]+'] = bugzillaSub
+ end
++if $gforgeBugURL != nil
++  commentSubstitutions['\B\[#[0-9]+\]'] = gforgeBugSub
++end
++if $gforgeTaskURL != nil
++  commentSubstitutions['\B\[[Tt][0-9]+\]'] = gforgeTaskSub
++end
+ if $jiraURL != nil
+   commentSubstitutions['\b[a-zA-Z]+-[0-9]+\b'] = jiraSub
+ end
+ if $ticketURL != nil
+   commentSubstitutions['\b[Tt][Ii][Cc][Kk][Ee][Tt]\s*#?[0-9]+\b'] = ticketSub
+ end
++if $wikiURL != nil
++  commentSubstitutions['\[\[.+\]\]'] = wikiSub
++end
+ $commentEncoder = MultiSub.new(commentSubstitutions)
+ 
+ 
+@@ -1359,12 +1462,16 @@
+ 		 "T" => tagHandler,
+ 		 "A" => AddedFileHandler.new,
+ 		 "R" => RemovedFileHandler.new,
++		 "C" => CopiedFileHandler.new,
+ 		 "M" => ModifiedFileHandler.new,
++		 "P" => ModifiedPropsFileHandler.new,
+ 		 "V" => VersionHandler.new]
+ 
+ $handlers["A"].setTagHandler(tagHandler)
+ $handlers["R"].setTagHandler(tagHandler)
++$handlers["C"].setTagHandler(tagHandler)
+ $handlers["M"].setTagHandler(tagHandler)
++$handlers["P"].setTagHandler(tagHandler)
+ 
+ $fileEntries = Array.new
+ $task_list = Array.new
+@@ -1374,7 +1481,8 @@
+ 
+   $diff_output_limiter = OutputSizeLimiter.new(mail, $mail_size_limit)
+ 
+-    reader = LogReader.new($stdin)
++  File.open($logfile) do |log|
++    reader = LogReader.new(log)
+ 
+     until reader.eof
+       handler = $handlers[reader.currentLineCode]
+@@ -1383,11 +1491,16 @@
+       end
+       handler.handleLines(reader.getLines, $diff_output_limiter)
+     end
++  end
+ 
+ end
+ 
+ if $subjectPrefix == nil
+-  $subjectPrefix = "[SVN #{Repository.array.join(',')}]"
++  if $svn
++    $subjectPrefix = "[SVN #{Repository.array.join(',')}]"
++  else
++    $subjectPrefix = "[CVS #{Repository.array.join(',')}]"
++  end
+ end
+ 
+ if $files_in_subject
+@@ -1434,13 +1547,15 @@
+   #removed {background-color:#ffdddd;}
+   #removedchars {background-color:#ff9999;font-weight:bolder;}
+   tr.alt #removed {background-color:#f7cccc;}
++  #copied {background-color:#ccccff;}
++  tr.alt #copied {background-color:#bbbbf7;}
+   #info {color:#888888;}
+   #context {background-color:#eeeeee;}
+   td {padding-left:.3em;padding-right:.3em;}
+   tr.head {border-bottom-width:1px;border-bottom-style:solid;}
+   tr.head td {padding:0;padding-top:.2em;}
+   .task {background-color:#ffff00;}
+-  .comment {padding:4px;border:1px dashed #000000;background-color:#ffffdd}
++  .comment {white-space:-moz-pre-wrap;white-space:-pre-wrap;white-space:-o-pre-wrap;white-space:pre-wrap;word-wrap:break-word;padding:4px;border:1px dashed #000000;background-color:#ffffdd}
+   .error {color:red;}
+   hr {border-width:0px;height:2px;background:black;}
+ --></style>
+@@ -1466,7 +1581,9 @@
+ 
+   filesAdded = 0
+   filesRemoved = 0
++  filesCopied = 0
+   filesModified  = 0
++  filesModifiedProps  = 0
+   totalLinesAdded = 0
+   totalLinesRemoved = 0
+   file_count = 0
+@@ -1475,24 +1592,26 @@
+   $fileEntries.each do |file|
+     unless file.repository == last_repository
+       last_repository = file.repository
+-      mail.print("<tr class=\"head\"><td colspan=\"#{last_repository.has_multiple_tags ? 5 : 4}\">")
++      mail.print("<tr class=\"head\"><td colspan=\"#{last_repository.has_multiple_tags ? 6 : 5}\">")
+       if last_repository.has_multiple_tags
+         mail.print("Mixed-tag commit")
+       else
+         mail.print("Commit")
+       end
+       mail.print(" in <b><tt>#{htmlEncode(last_repository.common_prefix)}</tt></b>")
+-      if last_repository.trunk_only?
+-        mail.print("<span id=\"info\"> on MAIN</span>")
+-      else
+-        mail.print(" on ")
+-        tagCount = 0
+-        last_repository.each_tag do |tag|
+-          tagCount += 1
+-          if tagCount > 1
+-            mail.print tagCount<last_repository.tag_count ? ", " : " &amp; "
++      if !$svn
++        if last_repository.trunk_only?
++          mail.print("<span id=\"info\"> on MAIN</span>")
++        else
++          mail.print(" on ")
++          tagCount = 0
++          last_repository.each_tag do |tag|
++            tagCount += 1
++            if tagCount > 1
++              mail.print tagCount<last_repository.tag_count ? ", " : " &amp; "
++            end
++            mail.print tag ? htmlEncode(tag) : "<span id=\"info\">MAIN</span>"
+           end
+-          mail.print tag ? htmlEncode(tag) : "<span id=\"info\">MAIN</span>"
+         end
+       end
+       mail.puts("</td></tr>")
+@@ -1507,8 +1626,12 @@
+       filesAdded += 1
+     elsif file.removal?
+       filesRemoved += 1
++    elsif file.copied?
++      filesCopied += 1
+     elsif file.modification?
+       filesModified += 1
++    elsif file.modifiedprops?
++      filesModifiedProps += 1
+     end
+     name = htmlEncode(file.name_after_common_prefix)
+     slashPos = name.rindex("/")
+@@ -1528,17 +1651,29 @@
+       name = "<span id=\"added\">#{name}</span>"
+     elsif file.removal?
+       name = "<span id=\"removed\">#{name}</span>"
++    elsif file.copied?
++      name = "<span id=\"copied\">#{name}</span>"
+     end
++    mail.print("<td>")
+     if file.has_diff?
+-      mail.print("<td><tt>#{prefix}<a href=\"#file#{file_count}\">#{name}</a></tt></td>")
++      mail.print("<tt>#{prefix}<a href=\"#file#{file_count}\">#{name}</a></tt>")
+     else
+-      mail.print("<td><tt>#{prefix}#{name}</tt></td>")
++      mail.print("<tt>#{prefix}#{name}</tt>")
+     end
+-    if file.isEmpty
+-      mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[empty]</small></td>")
++    mail.print(" #{$frontend.log(file)}")
++    mail.print("</td>")
++    if file.copied?
++      mail.print("<td colspan=\"3\" align=\"center\"><small id=\"info\">[copied]</small></td>")
++    elsif file.isEmpty
++      mail.print("<td colspan=\"3\" align=\"center\"><small id=\"info\">[empty]</small></td>")
+     elsif file.isBinary
+-      mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[binary]</small></td>")
++      mail.print("<td colspan=\"3\" align=\"center\"><small id=\"info\">[binary]</small></td>")
+     else
++      if file.modifiedprops?
++        mail.print("<td align=\"right\"><small id=\"info\">[props]</small></td>")
++      else
++        mail.print("<td></td>")
++      end
+       if file.lineAdditions>0
+         totalLinesAdded += file.lineAdditions
+         mail.print("<td align=\"right\" id=\"added\">+#{file.lineAdditions}</td>")
+@@ -1565,15 +1700,19 @@
+       mail.print("<td nowrap=\"nowrap\" align=\"right\">added #{$frontend.version(file.path,file.toVer)}</td>")
+     elsif file.removal?
+       mail.print("<td nowrap=\"nowrap\">#{$frontend.version(file.path,file.fromVer)} removed</td>")
++    elsif file.copied?
++      mail.print("<td nowrap=\"nowrap\" align=\"center\">#{$frontend.version(file.path,file.fromVer)} #{$frontend.diff(file)} #{$frontend.version(file.path,file.toVer)}</td>")
+     elsif file.modification?
+       mail.print("<td nowrap=\"nowrap\" align=\"center\">#{$frontend.version(file.path,file.fromVer)} #{$frontend.diff(file)} #{$frontend.version(file.path,file.toVer)}</td>")
++    elsif file.modifiedprops?
++      mail.print("<td nowrap=\"nowrap\" align=\"center\">#{$frontend.version(file.path,file.fromVer)} #{$frontend.diff(file)} #{$frontend.version(file.path,file.toVer)}</td>")
+     end
+ 
+     mail.puts("</tr>")
+   end
+   if $fileEntries.size>1 && (totalLinesAdded+totalLinesRemoved)>0
+     # give total number of lines added/removed accross all files
+-    mail.print("<tr><td></td>")
++    mail.print("<tr><td></td><td></td>")
+     if totalLinesAdded>0
+       mail.print("<td align=\"right\" id=\"added\">+#{totalLinesAdded}</td>")
+     else
+@@ -1590,7 +1729,7 @@
+   
+   mail.puts("</table>")
+ 
+-  totalFilesChanged = filesAdded+filesRemoved+filesModified
++  totalFilesChanged = filesAdded+filesRemoved+filesCopied+filesModified+filesModifiedProps
+   if totalFilesChanged > 1
+     mail.print("<small id=\"info\">")
+     changeKind = 0
+@@ -1603,11 +1742,21 @@
+       mail.print("#{filesRemoved} removed")
+       changeKind += 1
+     end
++    if filesCopied>0
++      mail.print(" + ") if changeKind>0
++      mail.print("#{filesCopied} copied")
++      changeKind += 1
++    end
+     if filesModified>0
+       mail.print(" + ") if changeKind>0
+       mail.print("#{filesModified} modified")
+       changeKind += 1
+     end
++    if filesModifiedProps>0
++      mail.print(" + ") if changeKind>0
++      mail.print("#{filesModifiedProps} modified properties")
++      changeKind += 1
++    end
+     mail.print(", total #{totalFilesChanged}") if changeKind > 1
+     mail.puts(" files</small><br />")
+   end
+@@ -1742,7 +1891,7 @@
+       from = EmailAddress.new(ENV['USER'] || ENV['USERNAME'] || 'cvsspam')
+     end  
+     unless from.address =~ /@/
+-      from.address = "#{from.address}@#{ENV['HOSTNAME']||'localhost'}"
++      from.address = "#{from.address}@#{$hostname}"
+     end
+     smtp = Net::SMTP.new(@smtp_host)
+     blah("connecting to '#{@smtp_host}'")
+@@ -1758,6 +1907,40 @@
+   end
+ end
+ 
++
++def make_msg_id(localpart, hostpart)
++  "<cvsspam-#{localpart}@#{hostpart}>"
++end
++
++
++# replaces control characters, and a selection of other characters that
++# may not appear unquoted in an RFC822 'word', with underscores.  (It
++# doesn't actually zap '.' though.)
++def zap_header_special_chars(text)
++  text.gsub(/<>()\[\]@,;:\\[\000-\037\177]/, "_")
++end
++
++
++# Mail clients will try to 'thread' together a conversation over
++# several email messages by inspecting the In-Reply-To and References headers,
++# which should refer to previous emails in the conversation by mentioning
++# the value of the previous message's Message-Id header.  This function invents
++# values for these headers so that, in the special case where a *single* file
++# is committed to repeatedly, the emails giving notification of these commits
++# can be threaded together automatically by the mail client.
++def inject_threading_headers(mail)
++  return unless $fileEntries.length == 1
++  file = $fileEntries[0]
++  name = zap_header_special_chars(file.path)
++  if file.fromVer
++    mail.header("References", make_msg_id("#{name}.#{file.fromVer}", $hostname))
++  end
++  if file.toVer
++    mail.header("Message-ID", make_msg_id("#{name}.#{file.toVer}", $hostname))
++  end
++end
++
++
+ if $smtp_host
+   require 'net/smtp'
+   mailer = SMTPMailer.new($smtp_host)
+@@ -1769,6 +1952,7 @@
+ 
+ mailer.send($from_address, $recipients) do |mail|
+   mail.header("Subject", mailSubject)
++  inject_threading_headers(mail)
+   mail.header("MIME-Version", "1.0")
+   mail.header("Content-Type", "text/html" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
+   if ENV['REMOTE_HOST']
