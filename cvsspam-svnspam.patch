@@ -1,6 +1,6 @@
---- cvsspam-0.2.12/svn_post_commit_hook.rb~	2005-07-11 18:53:29.000000000 +0300
-+++ cvsspam-0.2.12/svn_post_commit_hook.rb	2009-03-04 22:02:47.244474437 +0200
-@@ -28,8 +29,10 @@
+--- cvsspam-0.2.12/svn_post_commit_hook.rb	2009-03-04 22:21:45.091026513 +0200
++++ cvsspam-0.2.12-svn/svn_post_commit_hook.rb	2009-03-04 22:21:30.394359128 +0200
+@@ -28,12 +28,14 @@
  end
  
  def cleanup
@@ -13,3 +13,8 @@
  end
  
  def send_email
+-  cmd = File.dirname($0) + "/cvsspam.rb"
++  cmd = File.dirname($0) + "/svn_cvsspam.rb"
+   unless system(cmd,"--svn","#{$datadir}/logfile", *$passthrough_args)
+     fail "problem running '#{cmd}'"
+   end
