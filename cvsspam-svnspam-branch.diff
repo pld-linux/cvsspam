@@ -1,5 +1,5 @@
---- cvsspam-0.2.12/svn_cvsspam.rb	2005-07-11 18:53:29.000000000 +0300
-+++ cvsspam-svn/svn_cvsspam.rb	2009-03-04 23:47:04.364552847 +0200
+--- cvsspam-svn/svn_cvsspam.rb	2009-03-04 23:47:04.364552847 +0200
++++ svn/svn_cvsspam.rb	2009-03-05 00:54:18.266649054 +0200
 @@ -18,8 +18,9 @@
  # to your cvssppam.conf
  
@@ -256,7 +256,7 @@
      end
    end
  
-@@ -771,6 +843,17 @@
+@@ -771,8 +843,44 @@
    def diff_url(file)
      add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=text&amp;tr1=#{file.fromVer}&amp;r2=text&amp;tr2=#{file.toVer}&amp;f=h")
    end
@@ -273,8 +273,35 @@
 +  end
  end
  
++# Link to Trac
++class TracFrontend < WebFrontend
++  def path_url(path, tag)
++    add_repo("#{@base_url}browser/#{urlEncode(path)}")
++  end
++
++  def version_url(path, version)
++    add_repo("#{@base_url}browser/#{urlEncode(path)}?rev=#{version}")
++  end
++
++  def diff_url(file)
++    add_repo("#{@base_url}changeset/#{file.toVer}")
++  end
++
++  protected
++
++  def log_url(file)
++    if file.toVer
++      log_anchor = "?rev=#{file.toVer}"
++    else
++      log_anchor = ""
++    end
++    add_repo("#{@base_url}log/#{urlEncode(file.path)}#{log_anchor}")
++  end
++end
  
-@@ -792,6 +875,15 @@
+ # in need of refactoring...
+ 
+@@ -792,6 +900,15 @@
    end
  end
  
@@ -290,7 +317,7 @@
  # Note when LogReader finds record of a file that was modified in this commit
  class ModifiedFileHandler < FileHandler
    def handleFile(file)
-@@ -801,6 +893,15 @@
+@@ -801,6 +918,15 @@
    end
  end
  
@@ -306,7 +333,7 @@
  
  # Used by UnifiedDiffHandler to record the number of added and removed lines
  # appearing in a unidiff.
-@@ -949,7 +1050,7 @@
+@@ -949,7 +1075,7 @@
      end
      shift(nil)
      if @truncatedLineCount>0
@@ -315,7 +342,7 @@
      end
    end
  
-@@ -967,11 +1068,21 @@
+@@ -967,11 +1093,21 @@
          print($frontend.path($file.basedir, $file.tag))
          println("</span><br />")
          println("<div class=\"fileheader\" id=\"removed\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">removed after #{$frontend.version($file.path,$file.fromVer)}</small></div>")
@@ -337,7 +364,7 @@
      end
      print("<pre class=\"diff\"><small id=\"info\">")
      lines.each do |line|
-@@ -1045,7 +1156,7 @@
+@@ -1045,7 +1181,7 @@
       else
        @stats.consume(line)
        if $file.wants_diff_in_mail?
@@ -346,7 +373,7 @@
            @colour.consume(line)
          elsif @stats.diffLines == $maxLinesPerDiff
            @colour.consume(line)
-@@ -1062,7 +1173,7 @@
+@@ -1062,7 +1198,7 @@
        $file.isBinary = true
      else
        if $file.wants_diff_in_mail?
@@ -355,7 +382,7 @@
            println("</pre>")
            println("<strong class=\"error\">[truncated at #{$maxLinesPerDiff} lines; #{@stats.diffLines-$maxLinesPerDiff} more skipped]</strong>")
          else
-@@ -1172,7 +1283,7 @@
+@@ -1172,7 +1308,7 @@
  
  # an RFC 822 email address
  class EmailAddress
@@ -364,7 +391,7 @@
      if text =~ /^\s*([^<]+?)\s*<\s*([^>]+?)\s*>\s*$/
        @personal_name = $1
        @address = $2
-@@ -1180,9 +1291,10 @@
+@@ -1180,9 +1316,10 @@
        @personal_name = nil
        @address = text
      end
@@ -376,7 +403,7 @@
  
    def has_personal_name?
      return !@personal_name.nil?
-@@ -1213,7 +1325,7 @@
+@@ -1213,7 +1350,7 @@
    # rfc2047 encode the word, if it contains non-ASCII characters
    def encode_word(word)
      if $encoder.requires_rfc2047?(word)
@@ -385,7 +412,7 @@
        $encoder.each_char_encoded(word) do |code|
  	encoded << code
        end
-@@ -1228,18 +1340,28 @@
+@@ -1228,20 +1365,31 @@
  cvsroot_dir = "#{ENV['CVSROOT']}/CVSROOT"
  $config = "#{cvsroot_dir}/cvsspam.conf"
  $users_file = "#{cvsroot_dir}/users"
@@ -414,8 +441,11 @@
 +$xplannerStoryURL = nil
  $choraURL = nil
  $cvswebURL = nil
++$tracURL = nil
  $from_address = nil
-@@ -1250,6 +1372,7 @@
+ $subjectPrefix = nil
+ $files_in_subject = false;
+@@ -1250,6 +1398,7 @@
  # 2MiB limit on attached diffs,
  $mail_size_limit = 1024 * 1024 * 2
  $arg_charset = nil
@@ -423,7 +453,7 @@
  
  require 'getoptlong'
  
-@@ -1257,6 +1380,7 @@
+@@ -1257,6 +1406,7 @@
    [ "--to",     "-t", GetoptLong::REQUIRED_ARGUMENT ],
    [ "--config", "-c", GetoptLong::REQUIRED_ARGUMENT ],
    [ "--debug",  "-d", GetoptLong::NO_ARGUMENT ],
@@ -431,7 +461,7 @@
    [ "--from",   "-u", GetoptLong::REQUIRED_ARGUMENT ],
    [ "--charset",      GetoptLong::REQUIRED_ARGUMENT ]
  )
-@@ -1265,6 +1389,7 @@
+@@ -1265,6 +1415,7 @@
    $recipients << EmailAddress.new(arg) if opt=="--to"
    $config = arg if opt=="--config"
    $debug = true if opt=="--debug"
@@ -439,7 +469,7 @@
    $from_address = EmailAddress.new(arg) if opt=="--from"
    # must use different variable as the config is readed later.
    $arg_charset = arg if opt == "--charset"
-@@ -1277,12 +1402,13 @@
+@@ -1277,12 +1428,13 @@
    else
      $stderr.puts "missing required file argument"
    end
@@ -454,7 +484,26 @@
  $additionalHeaders = Array.new
  $problemHeaders = Array.new
  
-@@ -1341,7 +1467,13 @@
+@@ -1309,6 +1461,8 @@
+   blah("Config file '#{$config}' not found, ignoring")
+ end
+ 
++blah("Users file: '#{$users_file}'")
++
+ unless $arg_charset.nil?
+   $charset = $arg_charset
+ end
+@@ -1325,6 +1479,9 @@
+ elsif $cvswebURL !=nil
+   $cvswebURL << "/" unless $cvswebURL =~ /\/$/
+   $frontend = CVSwebFrontend.new($cvswebURL)
++elsif $tracURL !=nil
++  $tracURL << "/" unless $tracURL =~ /\/$/
++  $frontend = TracFrontend.new($tracURL)
+ else
+   $frontend = NoFrontend.new
+ end
+@@ -1341,7 +1498,13 @@
  
  
  if $bugzillaURL != nil
@@ -469,7 +518,7 @@
  end
  if $jiraURL != nil
    commentSubstitutions['\b[a-zA-Z]+-[0-9]+\b'] = jiraSub
-@@ -1349,6 +1481,21 @@
+@@ -1349,6 +1512,21 @@
  if $ticketURL != nil
    commentSubstitutions['\b[Tt][Ii][Cc][Kk][Ee][Tt]\s*#?[0-9]+\b'] = ticketSub
  end
@@ -491,7 +540,7 @@
  $commentEncoder = MultiSub.new(commentSubstitutions)
  
  
-@@ -1359,12 +1506,16 @@
+@@ -1359,12 +1537,16 @@
  		 "T" => tagHandler,
  		 "A" => AddedFileHandler.new,
  		 "R" => RemovedFileHandler.new,
@@ -508,7 +557,7 @@
  
  $fileEntries = Array.new
  $task_list = Array.new
-@@ -1374,7 +1525,8 @@
+@@ -1374,7 +1556,8 @@
  
    $diff_output_limiter = OutputSizeLimiter.new(mail, $mail_size_limit)
  
@@ -518,7 +567,7 @@
  
      until reader.eof
        handler = $handlers[reader.currentLineCode]
-@@ -1383,11 +1535,16 @@
+@@ -1383,11 +1566,16 @@
        end
        handler.handleLines(reader.getLines, $diff_output_limiter)
      end
@@ -536,7 +585,7 @@
  end
  
  if $files_in_subject
-@@ -1434,13 +1591,15 @@
+@@ -1434,13 +1622,15 @@
    #removed {background-color:#ffdddd;}
    #removedchars {background-color:#ff9999;font-weight:bolder;}
    tr.alt #removed {background-color:#f7cccc;}
@@ -553,7 +602,7 @@
    .error {color:red;}
    hr {border-width:0px;height:2px;background:black;}
  --></style>
-@@ -1466,7 +1625,9 @@
+@@ -1466,7 +1656,9 @@
  
    filesAdded = 0
    filesRemoved = 0
@@ -563,7 +612,7 @@
    totalLinesAdded = 0
    totalLinesRemoved = 0
    file_count = 0
-@@ -1475,24 +1636,26 @@
+@@ -1475,24 +1667,26 @@
    $fileEntries.each do |file|
      unless file.repository == last_repository
        last_repository = file.repository
@@ -601,7 +650,7 @@
          end
        end
        mail.puts("</td></tr>")
-@@ -1507,8 +1670,12 @@
+@@ -1507,8 +1701,12 @@
        filesAdded += 1
      elsif file.removal?
        filesRemoved += 1
@@ -614,7 +663,7 @@
      end
      name = htmlEncode(file.name_after_common_prefix)
      slashPos = name.rindex("/")
-@@ -1528,17 +1695,29 @@
+@@ -1528,17 +1726,29 @@
        name = "<span id=\"added\">#{name}</span>"
      elsif file.removal?
        name = "<span id=\"removed\">#{name}</span>"
@@ -649,7 +698,7 @@
        if file.lineAdditions>0
          totalLinesAdded += file.lineAdditions
          mail.print("<td align=\"right\" id=\"added\">+#{file.lineAdditions}</td>")
-@@ -1565,15 +1744,19 @@
+@@ -1565,15 +1775,19 @@
        mail.print("<td nowrap=\"nowrap\" align=\"right\">added #{$frontend.version(file.path,file.toVer)}</td>")
      elsif file.removal?
        mail.print("<td nowrap=\"nowrap\">#{$frontend.version(file.path,file.fromVer)} removed</td>")
@@ -670,7 +719,7 @@
      if totalLinesAdded>0
        mail.print("<td align=\"right\" id=\"added\">+#{totalLinesAdded}</td>")
      else
-@@ -1590,7 +1773,7 @@
+@@ -1590,7 +1804,7 @@
    
    mail.puts("</table>")
  
@@ -679,7 +728,7 @@
    if totalFilesChanged > 1
      mail.print("<small id=\"info\">")
      changeKind = 0
-@@ -1603,11 +1786,21 @@
+@@ -1603,11 +1817,21 @@
        mail.print("#{filesRemoved} removed")
        changeKind += 1
      end
@@ -701,7 +750,13 @@
      mail.print(", total #{totalFilesChanged}") if changeKind > 1
      mail.puts(" files</small><br />")
    end
-@@ -1655,7 +1848,7 @@
+@@ -1650,12 +1874,13 @@
+ # CVSROOT/users file, if the file exists.  The argument is returned unchanged
+ # if no alias is found.
+ def sender_alias(email)
++  blah("Lookup '#{email}' from users file")
+   if File.exists?($users_file)
+     File.open($users_file) do |io|
        io.each_line do |line|
          if line =~ /^([^:]+)\s*:\s*(['"]?)([^\n\r]+)(\2)/
            if email.address == $1
@@ -710,7 +765,7 @@
            end
          end
        end
-@@ -1669,6 +1862,8 @@
+@@ -1669,6 +1894,8 @@
  # sensible header formatting, and for ensuring that the body is seperated
  # from the message headers by a blank line (as it is required to be).
  class MailContext
@@ -719,7 +774,7 @@
    def initialize(io)
      @done_headers = false
      @io = io
-@@ -1678,8 +1873,8 @@
+@@ -1678,8 +1905,8 @@
    # called
    def header(name, value)
      raise "headers already commited" if @done_headers
@@ -730,7 +785,7 @@
      else
        @io.puts("#{name}: #{value}")
      end
-@@ -1742,7 +1937,7 @@
+@@ -1742,7 +1969,7 @@
        from = EmailAddress.new(ENV['USER'] || ENV['USERNAME'] || 'cvsspam')
      end  
      unless from.address =~ /@/
@@ -739,7 +794,7 @@
      end
      smtp = Net::SMTP.new(@smtp_host)
      blah("connecting to '#{@smtp_host}'")
-@@ -1752,12 +1947,46 @@
+@@ -1752,12 +1979,46 @@
        ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
        blah("Mail From: <#{from}>")
        ctx.header("From", from.encoded) if from
@@ -787,7 +842,7 @@
  if $smtp_host
    require 'net/smtp'
    mailer = SMTPMailer.new($smtp_host)
-@@ -1769,6 +1998,7 @@
+@@ -1769,6 +2030,7 @@
  
  mailer.send($from_address, $recipients) do |mail|
    mail.header("Subject", mailSubject)
@@ -795,7 +850,7 @@
    mail.header("MIME-Version", "1.0")
    mail.header("Content-Type", "text/html" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
    if ENV['REMOTE_HOST']
-@@ -1782,6 +2012,14 @@
+@@ -1782,6 +2044,14 @@
      end
    end
    mail.header("X-Mailer", "CVSspam #{$version} <http://www.badgers-in-foil.co.uk/projects/cvsspam/>")
@@ -810,7 +865,6 @@
  
    mail.body do |body|
      make_html_email(body)
-
 --- cvsspam-0.2.12/svn_post_commit_hook.rb	2005-07-11 18:53:29.000000000 +0300
 +++ cvsspam/cvsspam-svn/svn_post_commit_hook.rb	2008-08-07 17:27:52.628725224 +0300
 @@ -34,7 +34,7 @@
