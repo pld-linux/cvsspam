@@ -1,91 +1,418 @@
---- cvsspam-svn/svn_cvsspam.rb	2009-03-04 23:47:04.364552847 +0200
-+++ svn/svn_cvsspam.rb	2009-03-05 00:54:18.266649054 +0200
-@@ -18,8 +18,9 @@
- # to your cvssppam.conf
- 
- 
--$version = "0.2.11"
-+$version = "0.2.12"
- 
-+require 'time'
- 
- $maxSubjectLength = 200
- $maxLinesPerDiff = 1000
-@@ -35,10 +36,6 @@
-   a<b ? a : b
- end
- 
--# NB must ensure the time is UTC
--# (the Ruby Time object's strftime() doesn't supply a numeric timezone)
--DATE_HEADER_FORMAT = "%a, %d %b %Y %H:%M:%S +0000"
--
- # Perform (possibly) multiple global substitutions on a string.
- # the regexps given as keys must not use capturing subexpressions '(...)'
- class MultiSub
-@@ -48,7 +45,7 @@
-     @mash = Array.new
-     expr = nil
-     hash.each do |key,val|
--      if expr == nil ; expr="(" else expr<<"|(" end
-+      if expr == nil ; expr="(" else expr << "|(" end
-       expr << key << ")"
-       @mash << val
-     end
-@@ -116,6 +113,8 @@
-   UNDERSCORE = chr("_")
-   SPACE = chr(" ")
-   TAB = chr("\t")
-+  HOOK = chr("?")
-+  EQUALS = chr("=")
- 
-   # encode a header value according to the RFC-2047 quoted-printable spec,
-   # allowing non-ASCII characters to appear in header values, and wrapping
-@@ -137,8 +136,8 @@
-   # return a string representing the given character-code in quoted-printable
-   # format
-   def quoted_encode_char(b)
--    if b>126 || b==UNDERSCORE || b==TAB
--      sprintf("=%02x", b)
-+    if b>126 || b==UNDERSCORE || b==TAB || b==HOOK || b==EQUALS
-+      sprintf("=%02X", b)
-     elsif b == SPACE
-       "_"
-     else
-@@ -163,8 +162,9 @@
- 
-   # gives a string starting "=?", and including a charset specification, that
-   # marks the start of a quoted-printable character sequence
--  def marker_start_quoted
--    "=?#{@charset}?#{@encoding}?"
-+  def marker_start_quoted(charset=nil)
-+    charset = @charset if charset.nil?
-+    "=?#{charset}?#{@encoding}?"
-   end
- 
-   # test to see of the given string contains non-ASCII characters
-@@ -339,8 +339,11 @@
- 
-   # gets the Repository object for the first component of the given path
-   def Repository.get(name)
--    name =~ /^[^\/]+/
--    name = $&
-+    # Leading './' is ignored (for peeps who have done 'cvs checkout .')
-+    # Trailing '/' ensures no match for files in root (we just want dirs)
-+    name =~ /^(?:\.\/)?([^\/]+)\//  
-+    name = $1
-+    name = "/" if name.nil?  # file at top-level?  fake up a name for repo
-     rep = @@repositories[name]
-     if rep.nil?
-       rep =  Repository.new(name)
-@@ -385,6 +388,7 @@
- class FileEntry
-   def initialize(path)
-     @path = path
-+    @fromVer = @toVer = nil
-     @lineAdditions = @lineRemovals = 0
-     @repository = Repository.get(path)
-     @repository.merge_common_prefix(basedir())
-@@ -394,7 +398,7 @@
+--- svn_post_commit_hook.rb	(.../trunk)	(revision 0)
++++ svn_post_commit_hook.rb	(.../branches/svn_support)	(revision 265)
+@@ -0,0 +1,409 @@
++#!/usr/bin/ruby -w
++
++$svnlook_exe = "svnlook"  # default assumes the program is in $PATH
++
++def usage(msg)
++  $stderr.puts(msg)
++  exit(1)
++end
++
++def blah(msg)
++  if $debug
++    $stderr.puts "svn_post_commit_hook.rb: #{msg}"
++  end
++end
++
++$tmpdir = ENV["TMPDIR"] || "/tmp"
++$dirtemplate = "#svnspam.#{Process.getpgrp}.#{Process.uid}"
++# arguments to pass though to 'cvsspam.rb'
++$passthrough_args = []
++
++def make_data_dir
++  dir = "#{$tmpdir}/#{$dirtemplate}-#{rand(99999999)}"
++  Dir.mkdir(dir, 0700)
++  dir
++end
++
++def init
++  $datadir = make_data_dir
++
++  # set PWD so that svnlook can create its .svnlook directory
++  Dir.chdir($datadir)
++end
++
++def cleanup
++  unless $debug
++	  File.unlink("#{$datadir}/logfile")
++	  Dir.rmdir($datadir)
++  end
++end
++
++def send_email
++  cmd = File.dirname($0) + "/cvsspam.rb"
++  unless system(cmd,"--svn","#{$datadir}/logfile", *$passthrough_args)
++    fail "problem running '#{cmd}'"
++  end
++end
++
++# Like IO.popen, but accepts multiple arguments like Kernel.exec
++# (So no need to escape shell metacharacters)
++def safer_popen(*args)
++  IO.popen("-") do |pipe|
++    if pipe==nil
++      exec(*args)
++    else
++      yield pipe
++    end
++  end
++end
++
++
++# Process the command-line arguments in the given list
++def process_args
++  require 'getoptlong'
++
++  opts = GetoptLong.new(
++    [ "--to",     "-t", GetoptLong::REQUIRED_ARGUMENT ],
++    [ "--config", "-c", GetoptLong::REQUIRED_ARGUMENT ],
++    [ "--debug",  "-d", GetoptLong::NO_ARGUMENT ],
++    [ "--from",   "-u", GetoptLong::REQUIRED_ARGUMENT ],
++    [ "--charset",      GetoptLong::REQUIRED_ARGUMENT ]
++  )
++
++  opts.each do |opt, arg|
++    if ["--to", "--config", "--from", "--charset"].include?(opt)
++      $passthrough_args << opt << arg
++    end
++    if ["--debug"].include?(opt)
++      $passthrough_args << opt
++    end
++    $config = arg if opt=="--config"
++    $debug = true if opt == "--debug"
++  end
++
++  $repository = ARGV[0]
++  $revision = ARGV[1]
++
++  unless $revision =~ /^\d+$/
++    usage("revision must be an integer: #{revision.inspect}")
++  end
++  $revision = $revision.to_i
++
++  unless FileTest.directory?($repository)
++    usage("no such directory: #{$repository.inspect}")
++  end
++  $repository =~ /([^\/]+$)/ 
++  $shortrepo = $1
++end
++
++# runs the given svnlook subcommand
++def svnlook(cmd, revision, *args)
++  rev = revision.to_s
++  safer_popen($svnlook_exe, cmd, $repository, "-r", rev, *args) do |io|
++    yield io
++  end
++end
++
++class Change
++  def initialize(filechange, propchange, path)
++    @filechange = filechange
++    @propchange = propchange
++    @path = path
++  end
++
++  attr_accessor :filechange, :propchange, :path
++
++  def property_change?
++    @propchange != " "
++  end
++
++  def file_change?
++    @filechange != "_"
++  end
++
++  def addition?
++    @filechange == "A"
++  end
++
++  def deletion?
++    @filechange == "D"
++  end
++end
++
++
++
++# Line-oriented access to an underlying IO object.  Remembers 'current' line
++# for lookahead during parsing.
++class LineReader
++  def initialize(io)
++    @io = io
++  end
++
++  def current
++    @line
++  end
++
++  def next_line
++    (@line = @io.gets) != nil
++  end
++
++  def assert_current(re)
++    raise "unexpected #{current.inspect}" unless @line =~ re
++    $~
++  end
++
++  def assert_next(re=nil)
++    raise "unexpected end of text" unless next_line
++    unless re.nil?
++      raise "unexpected #{current.inspect}" unless @line =~ re
++    end
++    $~
++  end
++end
++
++
++def read_modified_diff(out, lines, path)
++  lines.assert_next(/^=+$/)
++  lines.assert_next
++  if lines.current =~ /\(Binary files differ\)/
++    process_modified_binary_diff(out, lines, path)
++  else
++    process_modified_text_diff(out, lines, path)
++  end
++end
++
++
++def process_modified_binary_diff(out, lines, path)
++  prev_rev= $revision-1
++  next_rev= $revision
++  out.puts "#V #{prev_rev},#{next_rev}"
++  out.puts "#M #{$shortrepo}/#{path}"
++  out.puts "#U diff x x"
++  out.puts "#U Binary files x and y differ"
++end
++
++
++def process_modified_text_diff(out, lines, path)
++  m = lines.assert_current(/^---.*\(rev (\d+)\)$/)
++  prev_rev = m[1].to_i
++  diff1 = lines.current
++  m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++  next_rev = m[1].to_i
++  diff2 = lines.current
++  out.puts "#V #{prev_rev},#{next_rev}"
++  out.puts "#M #{$shortrepo}/#{path}"
++  out.puts "#U #{diff1}"
++  out.puts "#U #{diff2}"
++  while lines.next_line && lines.current =~ /^[-\+ @\\]/
++    out.puts "#U #{lines.current}"
++  end
++end
++
++def read_added_diff(out, lines, path)
++  lines.assert_next(/^=+$/)
++  lines.assert_next
++  if lines.current =~ /\(Binary files differ\)/
++    process_added_binary_diff(out, lines, path)
++  else
++    process_added_text_diff(out, lines, path)
++  end
++end
++
++def process_added_binary_diff(out, lines, path)
++  next_rev= $revision
++  out.puts "#V NONE,#{next_rev}"
++  out.puts "#A #{$shortrepo}/#{path}"
++  out.puts "#U diff x x"
++  out.puts "#U Binary file x added"
++end
++
++def process_added_text_diff(out, lines, path)
++  m = lines.assert_current(/^---.*\(rev (\d+)\)$/)
++  prev_rev = m[1].to_i
++  diff1 = lines.current
++  m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++  next_rev = m[1].to_i
++  diff2 = lines.current
++  out.puts "#V NONE,#{next_rev}"
++  out.puts "#A #{$shortrepo}/#{path}"
++  out.puts "#U #{diff1}"
++  out.puts "#U #{diff2}"
++  while lines.next_line && lines.current =~ /^[-\+ @\\]/
++    out.puts "#U #{lines.current}"
++  end
++end
++
++def read_deleted_diff(out, lines, path)
++  lines.assert_next(/^=+$/)
++  m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
++  prev_rev = m[1].to_i
++  diff1 = lines.current
++  m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++  next_rev = m[1].to_i
++  diff2 = lines.current
++  out.puts "#V #{prev_rev},NONE"
++  out.puts "#R #{$shortrepo}/#{path}"
++  out.puts "#U #{diff1}"
++  out.puts "#U #{diff2}"
++  while lines.next_line && lines.current =~ /^[-\+ @\\]/
++    out.puts "#U #{lines.current}"
++  end
++end
++
++def read_property_lines(path, prop_name, revision)
++  lines = []
++  svnlook("propget", revision, prop_name, path) do |io|
++    io.each_line do |line|
++      lines << line.chomp
++    end
++  end
++  lines
++end
++
++def assert_prop_match(a, b)
++  if !b.nil? && a != b
++    raise "property mismatch: #{a.inspect}!=#{b.inspect}"
++  end
++end
++
++# We need to read the property change from the output of svnlook, but have
++# a difficulty in that there's no unambiguous delimiter marking the end of
++# a potentially multi-line property value.  Therefore, we do a seperate
++# svn propget on the given file to get the value of the property on its own,
++# and then use that value as a guide as to how much data to read from the
++# svnlook output.
++def munch_prop_text(path, prop_name, revision, lines, line0)
++  prop = read_property_lines(path, prop_name, revision)
++  if prop.empty?
++    assert_prop_match(line0, "")
++    return
++  end
++  assert_prop_match(line0, prop.shift)
++  prop.each do |prop_line|
++    lines.assert_next
++    assert_prop_match(lines.current.chomp, prop_line)
++  end
++end
++
++def read_properties_changed(out, lines, path)
++  prev_rev= $revision-1
++  next_rev= $revision
++  lines.assert_next(/^_+$/)
++  return unless lines.next_line
++  out.puts "#V #{prev_rev},#{next_rev}"
++  out.puts "#P #{$shortrepo}/#{path}"
++# The first three get consumed and not highlighted
++  out.puts "#U "
++  out.puts "#U Property changes:"
++  out.puts "#U "
++  while true
++    break unless lines.current =~ /^Name: (.+)$/
++    prop_name = $1
++    m = lines.assert_next(/^   ([-+]) (.*)/)
++    op = m[1]
++    line0 = m[2]
++    if op == "-"
++      munch_prop_text(path, prop_name, $revision-1, lines, line0)
++      if lines.next_line && lines.current =~ /^   \+ (.*)/
++	munch_prop_text(path, prop_name, $revision, lines, $1)
++	lines.next_line
++      end
++    else  # op == "+"
++      munch_prop_text(path, prop_name, $revision, lines, line0)
++      lines.next_line
++    end
++    out.puts "#U #{m[1]} #{prop_name}:#{m[2]}"
++  end
++  out.puts "#U "
++end
++
++def handle_copy(out, lines, path, from_ref, from_file)
++  prev_rev= $revision-1
++  next_rev= $revision
++  out.puts "#V #{$shortrepo}/#{from_file}:#{prev_rev},#{next_rev}"
++  out.puts "#C #{$shortrepo}/#{path}"
++  if lines.next_line && lines.current =~ /^=+$/
++    m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
++    prev_rev = m[1].to_i
++    diff1 = lines.current
++    m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++    next_rev = m[1].to_i
++    diff2 = lines.current
++    out.puts "#U #{diff1}"
++    out.puts "#U #{diff2}"
++    while lines.next_line && lines.current =~ /^[-\+ @\\]/
++      out.puts "#U #{lines.current}"
++    end
++  else
++    out.puts "#U "
++    out.puts "#U Copied from #{$shortrepo}/#{from_file}:#{from_ref}"
++    out.puts "#U "
++  end
++end
++
++def svnlook_author
++  svnlook("author", $revision) do |io|
++    return io.readline.chomp
++  end
++  nil
++end
++
++def find_author
++  return if $passthrough_args.include?("--from")
++  author = svnlook_author
++  if author
++    blah("Author from svnlook: '#{author}'")
++    $passthrough_args << "--from" << author
++  end
++end
++
++def process_svnlook_log(file)
++  svnlook("log", $revision) do |io|
++    io.each_line do |line|
++      file.puts("#> #{line}")
++    end
++  end
++end
++
++def process_svnlook_diff(file)
++  svnlook("diff", $revision) do |io|
++    lines = LineReader.new(io)
++    while lines.next_line
++      if lines.current =~ /^Modified:\s+(.*)/
++	read_modified_diff(file, lines, $1)
++      elsif lines.current =~ /^Added:\s+(.*)/
++	read_added_diff(file, lines, $1)
++      elsif lines.current =~ /^Copied:\s+(.*) \(from rev (\d+), (.*)\)$/
++	handle_copy(file, lines, $1, $2, $3)
++      elsif lines.current =~ /^Deleted:\s+(.*)/
++	read_deleted_diff(file, lines, $1)
++      elsif lines.current =~ /^Property changes on:\s+(.*)/
++	read_properties_changed(file, lines, $1)
++      elsif lines.current == "\n"
++	# ignore
++      else
++	raise "unable to parse line #{lines.current.inspect}"
++      end
++    end
++  end
++end
++
++def process_commit()
++  File.open("#{$datadir}/logfile", File::WRONLY|File::CREAT) do |file|
++    process_svnlook_log(file)
++    process_svnlook_diff(file)
++  end
++end
++
++
++def main
++  init()
++  process_args()
++  find_author()
++  process_commit()
++  send_email()
++  cleanup()
++end
++
++
++main
+--- cvsspam.rb	(.../trunk)	(revision 265)
++++ cvsspam.rb	(.../branches/svn_support)	(revision 265)
+@@ -398,7 +398,7 @@
  
    # the full path and filename within the repository
    attr_accessor :path
@@ -94,25 +421,7 @@
    attr_accessor :type
    # records number of 'addition' lines in diff output, once counted
    attr_accessor :lineAdditions
-@@ -412,7 +416,7 @@
-   # works out the filename part of #path
-   def file
-     @path =~ /.*\/(.*)/
--    $1 || @path
-+    $1
-   end
- 
-   # set the branch on which this change was committed, and add it to the list
-@@ -430,7 +434,7 @@
-   # works out the directory part of #path
-   def basedir
-     @path =~ /(.*)\/.*/
--    $1 || "/"
-+    $1
-   end
- 
-   # gives the Repository object this file was automatically associated with
-@@ -449,16 +453,27 @@
+@@ -453,17 +453,28 @@
    def removal?
      @type == "R"
    end
@@ -137,171 +446,12 @@
 +  def modifiedprops?
 +    @type == "P"
 +  end
-+
  
++
    # passing true, this object remembers that a diff will appear in the email,
    # passing false, this object remembers that no diff will appear in the email.
-@@ -530,6 +545,14 @@
- # TODO: consolidate these into a nicer framework,
- mailSub = proc { |match| "<a href=\"mailto:#{match}\">#{match}</a>" }
- urlSub = proc { |match| "<a href=\"#{match}\">#{match}</a>" }
-+gforgeTaskSub = proc { |match|
-+  match =~ /([0-9]+)/
-+  "<a href=\"#{$gforgeTaskURL.sub(/%s/, $1)}\">#{match}</a>"
-+}
-+gforgeBugSub = proc { |match|
-+  match =~ /([0-9]+)/
-+  "<a href=\"#{$gforgeBugURL.sub(/%s/, $1)}\">#{match}</a>"
-+}
- bugzillaSub = proc { |match|
-   match =~ /([0-9]+)/
-   "<a href=\"#{$bugzillaURL.sub(/%s/, $1)}\">#{match}</a>"
-@@ -541,9 +564,31 @@
-   match =~ /([0-9]+)/
-   "<a href=\"#{$ticketURL.sub(/%s/, $1)}\">#{match}</a>"
- }
-+issueSub = proc { |match|
-+  match =~ /([0-9]+)/
-+  "<a href=\"#{$issueURL.sub(/%s/, $1)}\">#{match}</a>"
-+}
-+wikiSub = proc { |match| 
-+  match =~ /\[\[(.*?)\]\]/
-+  raw = $1
-+  "<a href=\"#{$wikiURL.sub(/%s/, urlEncode(raw))}\">[[#{raw}]]</a>"
-+}
-+xplannerIterationSub = proc { |match|
-+  match =~ /([0-9]+)/
-+  "<a href=\"#{$xplannerIterationURL.sub(/%s/, $1)}\">#{match}</a>"
-+}
-+xplannerProjectSub = proc { |match|
-+  match =~ /([0-9]+)/
-+  "<a href=\"#{$xplannerProjectURL.sub(/%s/, $1)}\">#{match}</a>"
-+}
-+xplannerStorySub = proc { |match|
-+  match =~ /([0-9]+)/
-+  "<a href=\"#{$xplannerStoryURL.sub(/%s/, $1)}\">#{match}</a>"
-+}
- commentSubstitutions = {
- 		'(?:mailto:)?[\w\.\-\+\=]+\@[\w\-]+(?:\.[\w\-]+)+\b' => mailSub,
--		'\b(?:http|https|ftp):[^ \t\n<>"]+[\w/]' => urlSub}
-+		'\b(?:http|https|ftp):[^ \t\n<>"]+[\w/]' => urlSub
-+		}
- 
- # outputs commit log comment text supplied by LogReader as preformatted HTML
- class CommentHandler < LineConsumer
-@@ -661,6 +706,12 @@
-   def diff(file)
-     '-&gt;'
-   end
-+
-+  # may be overridden by subclasses that are able to make a hyperlink to a
-+  # history log for a file
-+  def log(file)
-+    ''
-+  end
- end
- 
- # Superclass for objects that can link to CVS frontends on the web (ViewCVS,
-@@ -701,6 +752,14 @@
-     "<a href=\"#{diff_url(file)}\">#{super(file)}</a>"
-   end
- 
-+  def log(file)
-+    link = log_url(file)
-+    if link
-+      return "<span id=\"info\">(<a href=\"#{link}\">log</a>)</span>"
-+    end
-+    return nil
-+  end
-+
-  protected
-   def add_repo(url)
-     if @repository_name
-@@ -713,6 +772,10 @@
-       url
-     end
-   end
-+
-+  def log_url(file)
-+    nil
-+  end
- end
- 
- # Link to ViewCVS
-@@ -736,6 +799,15 @@
-   def diff_url(file)
-     add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=#{file.fromVer}&amp;r2=#{file.toVer}")
-   end
-+
-+  def log_url(file)
-+    if file.toVer
-+      log_anchor = "#rev#{file.toVer}"
-+    else
-+      log_anchor = ""
-+    end
-+    add_repo("#{@base_url}#{urlEncode(file.path)}#{log_anchor}")
-+  end
- end
- 
- # Link to Chora, from the Horde framework
-@@ -758,9 +830,9 @@
- class CVSwebFrontend < WebFrontend
-   def path_url(path, tag)
-     if tag == nil
--      add_repo(@base_url + urlEncode(path))
-+      add_repo(@base_url + urlEncode(path) + "/")
-     else
--      add_repo("#{@base_url}#{urlEncode(path)}?only_with_tag=#{urlEncode(tag)}")
-+      add_repo("#{@base_url}#{urlEncode(path)}/?only_with_tag=#{urlEncode(tag)}")
-     end
-   end
- 
-@@ -771,8 +843,44 @@
-   def diff_url(file)
-     add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=text&amp;tr1=#{file.fromVer}&amp;r2=text&amp;tr2=#{file.toVer}&amp;f=h")
-   end
-+
-+  protected
-+
-+  def log_url(file)
-+    if file.toVer
-+      log_anchor = "#rev#{file.toVer}"
-+    else
-+      log_anchor = ""
-+    end
-+    add_repo("#{@base_url}#{urlEncode(file.path)}#{log_anchor}")
-+  end
- end
- 
-+# Link to Trac
-+class TracFrontend < WebFrontend
-+  def path_url(path, tag)
-+    add_repo("#{@base_url}browser/#{urlEncode(path)}")
-+  end
-+
-+  def version_url(path, version)
-+    add_repo("#{@base_url}browser/#{urlEncode(path)}?rev=#{version}")
-+  end
-+
-+  def diff_url(file)
-+    add_repo("#{@base_url}changeset/#{file.toVer}")
-+  end
-+
-+  protected
-+
-+  def log_url(file)
-+    if file.toVer
-+      log_anchor = "?rev=#{file.toVer}"
-+    else
-+      log_anchor = ""
-+    end
-+    add_repo("#{@base_url}log/#{urlEncode(file.path)}#{log_anchor}")
-+  end
-+end
- 
- # in need of refactoring...
- 
-@@ -792,6 +900,15 @@
+   # Once the value is set, it will not be changed
+@@ -889,6 +900,15 @@
    end
  end
  
@@ -317,7 +467,7 @@
  # Note when LogReader finds record of a file that was modified in this commit
  class ModifiedFileHandler < FileHandler
    def handleFile(file)
-@@ -801,6 +918,15 @@
+@@ -898,7 +918,16 @@
    end
  end
  
@@ -329,20 +479,12 @@
 +    file.toVer=$toVer
 +  end
 +end
-+
  
++
  # Used by UnifiedDiffHandler to record the number of added and removed lines
  # appearing in a unidiff.
-@@ -949,7 +1075,7 @@
-     end
-     shift(nil)
-     if @truncatedLineCount>0
--      println("<strong class=\"error\" title=\"#{@truncatedLineCount} lines truncated at column #{$maxDiffLineLength}\">[Note: Some over-long lines of diff output only partialy shown]</strong>")
-+      println("<strong class=\"error\" title=\"#{@truncatedLineCount} lines truncated at column #{$maxDiffLineLength}\">[Note: Some over-long lines of diff output only partially shown]</strong>")
-     end
-   end
- 
-@@ -967,11 +1093,21 @@
+ class UnifiedDiffStats
+@@ -1064,11 +1093,21 @@
          print($frontend.path($file.basedir, $file.tag))
          println("</span><br />")
          println("<div class=\"fileheader\" id=\"removed\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">removed after #{$frontend.version($file.path,$file.fromVer)}</small></div>")
@@ -364,96 +506,15 @@
      end
      print("<pre class=\"diff\"><small id=\"info\">")
      lines.each do |line|
-@@ -1045,7 +1181,7 @@
-      else
-       @stats.consume(line)
-       if $file.wants_diff_in_mail?
--        if @stats.diffLines < $maxLinesPerDiff
-+        if $maxLinesPerDiff.nil? || @stats.diffLines < $maxLinesPerDiff
-           @colour.consume(line)
-         elsif @stats.diffLines == $maxLinesPerDiff
-           @colour.consume(line)
-@@ -1062,7 +1198,7 @@
-       $file.isBinary = true
-     else
-       if $file.wants_diff_in_mail?
--        if @stats.diffLines > $maxLinesPerDiff
-+        if $maxLinesPerDiff && @stats.diffLines > $maxLinesPerDiff
-           println("</pre>")
-           println("<strong class=\"error\">[truncated at #{$maxLinesPerDiff} lines; #{@stats.diffLines-$maxLinesPerDiff} more skipped]</strong>")
-         else
-@@ -1172,7 +1308,7 @@
- 
- # an RFC 822 email address
- class EmailAddress
--  def initialize(text)
-+  def initialize(text, charset=nil)
-     if text =~ /^\s*([^<]+?)\s*<\s*([^>]+?)\s*>\s*$/
-       @personal_name = $1
-       @address = $2
-@@ -1180,9 +1316,10 @@
-       @personal_name = nil
-       @address = text
-     end
-+    @charset=charset
-   end
- 
--  attr_accessor :personal_name, :address
-+  attr_accessor :personal_name, :address, :charset
- 
-   def has_personal_name?
-     return !@personal_name.nil?
-@@ -1213,7 +1350,7 @@
-   # rfc2047 encode the word, if it contains non-ASCII characters
-   def encode_word(word)
-     if $encoder.requires_rfc2047?(word)
--      encoded = $encoder.marker_start_quoted
-+      encoded = $encoder.marker_start_quoted(@charset)
-       $encoder.each_char_encoded(word) do |code|
- 	encoded << code
-       end
-@@ -1228,20 +1365,31 @@
- cvsroot_dir = "#{ENV['CVSROOT']}/CVSROOT"
- $config = "#{cvsroot_dir}/cvsspam.conf"
- $users_file = "#{cvsroot_dir}/users"
-+$users_file_charset = nil
+@@ -1329,6 +1368,7 @@
+ $users_file_charset = nil
  
  $debug = false
 +$svn = false
  $recipients = Array.new
  $sendmail_prog = "/usr/sbin/sendmail"
-+$hostname = ENV['HOSTNAME'] || 'localhost'
- $no_removed_file_diff = false
- $no_added_file_diff = false
- $no_diff = false
--$task_keywords = ['TODO', 'FIXME']
-+$task_keywords = ['TODO', 'FIXME', 'FIXIT', 'todo']
- $bugzillaURL = nil
-+$gforgeBugURL = nil
-+$gforgeTaskURL = nil
-+$wikiURL = nil
- $jiraURL = nil
- $ticketURL = nil
-+$issueURL = nil
- $viewcvsURL = nil
-+$xplannerIterationURL = nil
-+$xplannerProjectURL = nil
-+$xplannerStoryURL = nil
- $choraURL = nil
- $cvswebURL = nil
-+$tracURL = nil
- $from_address = nil
- $subjectPrefix = nil
- $files_in_subject = false;
-@@ -1250,6 +1398,7 @@
- # 2MiB limit on attached diffs,
- $mail_size_limit = 1024 * 1024 * 2
- $arg_charset = nil
-+$cvsroot_email_header = false
- 
- require 'getoptlong'
- 
-@@ -1257,6 +1406,7 @@
+ $hostname = ENV['HOSTNAME'] || 'localhost'
+@@ -1366,6 +1406,7 @@
    [ "--to",     "-t", GetoptLong::REQUIRED_ARGUMENT ],
    [ "--config", "-c", GetoptLong::REQUIRED_ARGUMENT ],
    [ "--debug",  "-d", GetoptLong::NO_ARGUMENT ],
@@ -461,7 +522,7 @@
    [ "--from",   "-u", GetoptLong::REQUIRED_ARGUMENT ],
    [ "--charset",      GetoptLong::REQUIRED_ARGUMENT ]
  )
-@@ -1265,6 +1415,7 @@
+@@ -1374,6 +1415,7 @@
    $recipients << EmailAddress.new(arg) if opt=="--to"
    $config = arg if opt=="--config"
    $debug = true if opt=="--debug"
@@ -469,7 +530,7 @@
    $from_address = EmailAddress.new(arg) if opt=="--from"
    # must use different variable as the config is readed later.
    $arg_charset = arg if opt == "--charset"
-@@ -1277,12 +1428,13 @@
+@@ -1386,7 +1428,7 @@
    else
      $stderr.puts "missing required file argument"
    end
@@ -478,69 +539,7 @@
    exit(-1)
  end
  
- $logfile = ARGV[0]
- 
-+
- $additionalHeaders = Array.new
- $problemHeaders = Array.new
- 
-@@ -1309,6 +1461,8 @@
-   blah("Config file '#{$config}' not found, ignoring")
- end
- 
-+blah("Users file: '#{$users_file}'")
-+
- unless $arg_charset.nil?
-   $charset = $arg_charset
- end
-@@ -1325,6 +1479,9 @@
- elsif $cvswebURL !=nil
-   $cvswebURL << "/" unless $cvswebURL =~ /\/$/
-   $frontend = CVSwebFrontend.new($cvswebURL)
-+elsif $tracURL !=nil
-+  $tracURL << "/" unless $tracURL =~ /\/$/
-+  $frontend = TracFrontend.new($tracURL)
- else
-   $frontend = NoFrontend.new
- end
-@@ -1341,7 +1498,13 @@
- 
- 
- if $bugzillaURL != nil
--  commentSubstitutions['\b[Bb][Uu][Gg]\s*#?[0-9]+'] = bugzillaSub
-+  commentSubstitutions['\b[Bb](?:[Uu][Gg])?\s*[#:]?\s*\[?[0-9]+\]?'] = bugzillaSub
-+end
-+if $gforgeBugURL != nil
-+  commentSubstitutions['\B\[#[0-9]+\]'] = gforgeBugSub
-+end
-+if $gforgeTaskURL != nil
-+  commentSubstitutions['\B\[[Tt][0-9]+\]'] = gforgeTaskSub
- end
- if $jiraURL != nil
-   commentSubstitutions['\b[a-zA-Z]+-[0-9]+\b'] = jiraSub
-@@ -1349,6 +1512,21 @@
- if $ticketURL != nil
-   commentSubstitutions['\b[Tt][Ii][Cc][Kk][Ee][Tt]\s*#?[0-9]+\b'] = ticketSub
- end
-+if $issueURL != nil
-+  commentSubstitutions['\b[Ii][Ss][Ss][Uu][Ee]\s*#?[0-9]+\b'] = issueSub
-+end
-+if $wikiURL != nil
-+  commentSubstitutions['\[\[.+\]\]'] = wikiSub
-+end
-+if $xplannerIterationURL != nil
-+  commentSubstitutions['\bXI\[?[0-9]+\]?'] = xplannerIterationSub
-+end
-+if $xplannerProjectURL != nil
-+  commentSubstitutions['\bXP\[?[0-9]+\]?'] = xplannerProjectSub
-+end
-+if $xplannerStoryURL != nil
-+  commentSubstitutions['\bXS\[?[0-9]+\]?'] = xplannerStorySub
-+end
- $commentEncoder = MultiSub.new(commentSubstitutions)
- 
- 
-@@ -1359,12 +1537,16 @@
+@@ -1495,12 +1537,16 @@
  		 "T" => tagHandler,
  		 "A" => AddedFileHandler.new,
  		 "R" => RemovedFileHandler.new,
@@ -557,26 +556,11 @@
  
  $fileEntries = Array.new
  $task_list = Array.new
-@@ -1374,7 +1556,8 @@
- 
-   $diff_output_limiter = OutputSizeLimiter.new(mail, $mail_size_limit)
- 
--    reader = LogReader.new($stdin)
-+  File.open($logfile) do |log|
-+    reader = LogReader.new(log)
- 
-     until reader.eof
-       handler = $handlers[reader.currentLineCode]
-@@ -1383,11 +1566,16 @@
-       end
-       handler.handleLines(reader.getLines, $diff_output_limiter)
-     end
-+  end
- 
+@@ -1525,7 +1571,11 @@
  end
  
  if $subjectPrefix == nil
--  $subjectPrefix = "[SVN #{Repository.array.join(',')}]"
+-  $subjectPrefix = "[CVS #{Repository.array.join(',')}]"
 +  if $svn
 +    $subjectPrefix = "[SVN #{Repository.array.join(',')}]"
 +  else
@@ -585,7 +569,7 @@
  end
  
  if $files_in_subject
-@@ -1434,13 +1622,15 @@
+@@ -1572,6 +1622,8 @@
    #removed {background-color:#ffdddd;}
    #removedchars {background-color:#ff9999;font-weight:bolder;}
    tr.alt #removed {background-color:#f7cccc;}
@@ -594,15 +578,7 @@
    #info {color:#888888;}
    #context {background-color:#eeeeee;}
    td {padding-left:.3em;padding-right:.3em;}
-   tr.head {border-bottom-width:1px;border-bottom-style:solid;}
-   tr.head td {padding:0;padding-top:.2em;}
-   .task {background-color:#ffff00;}
--  .comment {padding:4px;border:1px dashed #000000;background-color:#ffffdd}
-+  .comment {white-space:-moz-pre-wrap;white-space:-pre-wrap;white-space:-o-pre-wrap;white-space:pre-wrap;word-wrap:break-word;padding:4px;border:1px dashed #000000;background-color:#ffffdd}
-   .error {color:red;}
-   hr {border-width:0px;height:2px;background:black;}
- --></style>
-@@ -1466,7 +1656,9 @@
+@@ -1604,7 +1656,9 @@
  
    filesAdded = 0
    filesRemoved = 0
@@ -612,7 +588,7 @@
    totalLinesAdded = 0
    totalLinesRemoved = 0
    file_count = 0
-@@ -1475,24 +1667,26 @@
+@@ -1613,24 +1667,26 @@
    $fileEntries.each do |file|
      unless file.repository == last_repository
        last_repository = file.repository
@@ -650,7 +626,7 @@
          end
        end
        mail.puts("</td></tr>")
-@@ -1507,8 +1701,12 @@
+@@ -1645,8 +1701,12 @@
        filesAdded += 1
      elsif file.removal?
        filesRemoved += 1
@@ -663,25 +639,21 @@
      end
      name = htmlEncode(file.name_after_common_prefix)
      slashPos = name.rindex("/")
-@@ -1528,17 +1726,29 @@
+@@ -1666,6 +1726,8 @@
        name = "<span id=\"added\">#{name}</span>"
      elsif file.removal?
        name = "<span id=\"removed\">#{name}</span>"
 +    elsif file.copied?
 +      name = "<span id=\"copied\">#{name}</span>"
      end
-+    mail.print("<td>")
+     mail.print("<td>")
      if file.has_diff?
--      mail.print("<td><tt>#{prefix}<a href=\"#file#{file_count}\">#{name}</a></tt></td>")
-+      mail.print("<tt>#{prefix}<a href=\"#file#{file_count}\">#{name}</a></tt>")
-     else
--      mail.print("<td><tt>#{prefix}#{name}</tt></td>")
-+      mail.print("<tt>#{prefix}#{name}</tt>")
+@@ -1675,11 +1737,18 @@
      end
+     mail.print(" #{$frontend.log(file)}")
+     mail.print("</td>")
 -    if file.isEmpty
 -      mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[empty]</small></td>")
-+    mail.print(" #{$frontend.log(file)}")
-+    mail.print("</td>")
 +    if file.copied?
 +      mail.print("<td colspan=\"3\" align=\"center\"><small id=\"info\">[copied]</small></td>")
 +    elsif file.isEmpty
@@ -698,7 +670,7 @@
        if file.lineAdditions>0
          totalLinesAdded += file.lineAdditions
          mail.print("<td align=\"right\" id=\"added\">+#{file.lineAdditions}</td>")
-@@ -1565,15 +1775,19 @@
+@@ -1706,15 +1775,19 @@
        mail.print("<td nowrap=\"nowrap\" align=\"right\">added #{$frontend.version(file.path,file.toVer)}</td>")
      elsif file.removal?
        mail.print("<td nowrap=\"nowrap\">#{$frontend.version(file.path,file.fromVer)} removed</td>")
@@ -719,7 +691,7 @@
      if totalLinesAdded>0
        mail.print("<td align=\"right\" id=\"added\">+#{totalLinesAdded}</td>")
      else
-@@ -1590,7 +1804,7 @@
+@@ -1731,7 +1804,7 @@
    
    mail.puts("</table>")
  
@@ -728,7 +700,7 @@
    if totalFilesChanged > 1
      mail.print("<small id=\"info\">")
      changeKind = 0
-@@ -1603,11 +1817,21 @@
+@@ -1744,11 +1817,21 @@
        mail.print("#{filesRemoved} removed")
        changeKind += 1
      end
@@ -750,367 +722,3 @@
      mail.print(", total #{totalFilesChanged}") if changeKind > 1
      mail.puts(" files</small><br />")
    end
-@@ -1650,12 +1874,13 @@
- # CVSROOT/users file, if the file exists.  The argument is returned unchanged
- # if no alias is found.
- def sender_alias(email)
-+  blah("Lookup '#{email}' from users file")
-   if File.exists?($users_file)
-     File.open($users_file) do |io|
-       io.each_line do |line|
-         if line =~ /^([^:]+)\s*:\s*(['"]?)([^\n\r]+)(\2)/
-           if email.address == $1
--            return EmailAddress.new($3)
-+            return EmailAddress.new($3, $users_file_charset)
-           end
-         end
-       end
-@@ -1669,6 +1894,8 @@
- # sensible header formatting, and for ensuring that the body is seperated
- # from the message headers by a blank line (as it is required to be).
- class MailContext
-+  ENCODE_HEADERS = ["Subject", "X-CVSspam-Module-Path"]
-+
-   def initialize(io)
-     @done_headers = false
-     @io = io
-@@ -1678,8 +1905,8 @@
-   # called
-   def header(name, value)
-     raise "headers already commited" if @done_headers
--    if name == "Subject"
--      $encoder.encode_header(@io, "Subject", value)
-+    if ENCODE_HEADERS.include?(name)
-+      $encoder.encode_header(@io, name, value)
-     else
-       @io.puts("#{name}: #{value}")
-     end
-@@ -1742,7 +1969,7 @@
-       from = EmailAddress.new(ENV['USER'] || ENV['USERNAME'] || 'cvsspam')
-     end  
-     unless from.address =~ /@/
--      from.address = "#{from.address}@#{ENV['HOSTNAME']||'localhost'}"
-+      from.address = "#{from.address}@#{$hostname}"
-     end
-     smtp = Net::SMTP.new(@smtp_host)
-     blah("connecting to '#{@smtp_host}'")
-@@ -1752,12 +1979,46 @@
-       ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
-       blah("Mail From: <#{from}>")
-       ctx.header("From", from.encoded) if from
--      ctx.header("Date", Time.now.utc.strftime(DATE_HEADER_FORMAT))
-+      ctx.header("Date", Time.now.rfc2822)
-       yield ctx
-     end
-   end
- end
- 
-+
-+def make_msg_id(localpart, hostpart)
-+  "<cvsspam-#{localpart}@#{hostpart}>"
-+end
-+
-+
-+# replaces control characters, and a selection of other characters that
-+# may not appear unquoted in an RFC822 'word', with underscores.  (It
-+# doesn't actually zap '.' though.)
-+def zap_header_special_chars(text)
-+  text.gsub(/<>()\[\]@,;:\\[\000-\037\177]/, "_")
-+end
-+
-+
-+# Mail clients will try to 'thread' together a conversation over
-+# several email messages by inspecting the In-Reply-To and References headers,
-+# which should refer to previous emails in the conversation by mentioning
-+# the value of the previous message's Message-Id header.  This function invents
-+# values for these headers so that, in the special case where a *single* file
-+# is committed to repeatedly, the emails giving notification of these commits
-+# can be threaded together automatically by the mail client.
-+def inject_threading_headers(mail)
-+  return unless $fileEntries.length == 1
-+  file = $fileEntries[0]
-+  name = zap_header_special_chars(file.path)
-+  if file.fromVer
-+    mail.header("References", make_msg_id("#{name}.#{file.fromVer}", $hostname))
-+  end
-+  if file.toVer
-+    mail.header("Message-ID", make_msg_id("#{name}.#{file.toVer}", $hostname))
-+  end
-+end
-+
-+
- if $smtp_host
-   require 'net/smtp'
-   mailer = SMTPMailer.new($smtp_host)
-@@ -1769,6 +2030,7 @@
- 
- mailer.send($from_address, $recipients) do |mail|
-   mail.header("Subject", mailSubject)
-+  inject_threading_headers(mail)
-   mail.header("MIME-Version", "1.0")
-   mail.header("Content-Type", "text/html" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
-   if ENV['REMOTE_HOST']
-@@ -1782,6 +2044,14 @@
-     end
-   end
-   mail.header("X-Mailer", "CVSspam #{$version} <http://www.badgers-in-foil.co.uk/projects/cvsspam/>")
-+  if $cvsroot_email_header
-+    mod = '/'
-+    if Repository.count == 1
-+      rep = Repository.array.first
-+      mod << rep.common_prefix
-+    end
-+    mail.header("X-CVSspam-Module-Path", mod)
-+  end
- 
-   mail.body do |body|
-     make_html_email(body)
---- cvsspam-0.2.12/svn_post_commit_hook.rb	2005-07-11 18:53:29.000000000 +0300
-+++ cvsspam/cvsspam-svn/svn_post_commit_hook.rb	2008-08-07 17:27:52.628725224 +0300
-@@ -34,7 +34,7 @@
- 
- def send_email
-   cmd = File.dirname($0) + "/cvsspam.rb"
--  unless system(cmd, "#{$datadir}/logfile", *$passthrough_args)
-+  unless system(cmd,"--svn","#{$datadir}/logfile", *$passthrough_args)
-     fail "problem running '#{cmd}'"
-   end
- end
-@@ -86,6 +86,8 @@
-   unless FileTest.directory?($repository)
-     usage("no such directory: #{$repository.inspect}")
-   end
-+  $repository =~ /([^\/]+$)/ 
-+  $shortrepo = $1
- end
- 
- # runs the given svnlook subcommand
-@@ -123,16 +125,6 @@
- end
- 
- 
--def each_changed
--  svnlook("changed", $revision) do |io|
--    io.each_line do |line|
--      line =~ /^(.)(.)  (.*)$/
--      yield Change.new($1, $2, $3)
--    end
--  end
--end
--
--
- 
- # Line-oriented access to an underlying IO object.  Remembers 'current' line
- # for lookahead during parsing.
-@@ -149,10 +141,15 @@
-     (@line = @io.gets) != nil
-   end
- 
-+  def assert_current(re)
-+    raise "unexpected #{current.inspect}" unless @line =~ re
-+    $~
-+  end
-+
-   def assert_next(re=nil)
-     raise "unexpected end of text" unless next_line
-     unless re.nil?
--      raise "unexpected #{lines.current.inspect}" unless @line =~ re
-+      raise "unexpected #{current.inspect}" unless @line =~ re
-     end
-     $~
-   end
-@@ -161,14 +158,34 @@
- 
- def read_modified_diff(out, lines, path)
-   lines.assert_next(/^=+$/)
--  m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
-+  lines.assert_next
-+  if lines.current =~ /\(Binary files differ\)/
-+    process_modified_binary_diff(out, lines, path)
-+  else
-+    process_modified_text_diff(out, lines, path)
-+  end
-+end
-+
-+
-+def process_modified_binary_diff(out, lines, path)
-+  prev_rev= $revision-1
-+  next_rev= $revision
-+  out.puts "#V #{prev_rev},#{next_rev}"
-+  out.puts "#M #{$shortrepo}/#{path}"
-+  out.puts "#U diff x x"
-+  out.puts "#U Binary files x and y differ"
-+end
-+
-+
-+def process_modified_text_diff(out, lines, path)
-+  m = lines.assert_current(/^---.*\(rev (\d+)\)$/)
-   prev_rev = m[1].to_i
-   diff1 = lines.current
-   m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
-   next_rev = m[1].to_i
-   diff2 = lines.current
-   out.puts "#V #{prev_rev},#{next_rev}"
--  out.puts "#M #{path}"
-+  out.puts "#M #{$shortrepo}/#{path}"
-   out.puts "#U #{diff1}"
-   out.puts "#U #{diff2}"
-   while lines.next_line && lines.current =~ /^[-\+ @\\]/
-@@ -178,14 +195,31 @@
- 
- def read_added_diff(out, lines, path)
-   lines.assert_next(/^=+$/)
--  m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
-+  lines.assert_next
-+  if lines.current =~ /\(Binary files differ\)/
-+    process_added_binary_diff(out, lines, path)
-+  else
-+    process_added_text_diff(out, lines, path)
-+  end
-+end
-+
-+def process_added_binary_diff(out, lines, path)
-+  next_rev= $revision
-+  out.puts "#V NONE,#{next_rev}"
-+  out.puts "#A #{$shortrepo}/#{path}"
-+  out.puts "#U diff x x"
-+  out.puts "#U Binary file x added"
-+end
-+
-+def process_added_text_diff(out, lines, path)
-+  m = lines.assert_current(/^---.*\(rev (\d+)\)$/)
-   prev_rev = m[1].to_i
-   diff1 = lines.current
-   m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
-   next_rev = m[1].to_i
-   diff2 = lines.current
-   out.puts "#V NONE,#{next_rev}"
--  out.puts "#A #{path}"
-+  out.puts "#A #{$shortrepo}/#{path}"
-   out.puts "#U #{diff1}"
-   out.puts "#U #{diff2}"
-   while lines.next_line && lines.current =~ /^[-\+ @\\]/
-@@ -202,7 +236,7 @@
-   next_rev = m[1].to_i
-   diff2 = lines.current
-   out.puts "#V #{prev_rev},NONE"
--  out.puts "#R #{path}"
-+  out.puts "#R #{$shortrepo}/#{path}"
-   out.puts "#U #{diff1}"
-   out.puts "#U #{diff2}"
-   while lines.next_line && lines.current =~ /^[-\+ @\\]/
-@@ -221,13 +255,23 @@
- end
- 
- def assert_prop_match(a, b)
--  if a != b
-+  if !b.nil? && a != b
-     raise "property mismatch: #{a.inspect}!=#{b.inspect}"
-   end
- end
- 
-+# We need to read the property change from the output of svnlook, but have
-+# a difficulty in that there's no unambiguous delimiter marking the end of
-+# a potentially multi-line property value.  Therefore, we do a seperate
-+# svn propget on the given file to get the value of the property on its own,
-+# and then use that value as a guide as to how much data to read from the
-+# svnlook output.
- def munch_prop_text(path, prop_name, revision, lines, line0)
-   prop = read_property_lines(path, prop_name, revision)
-+  if prop.empty?
-+    assert_prop_match(line0, "")
-+    return
-+  end
-   assert_prop_match(line0, prop.shift)
-   prop.each do |prop_line|
-     lines.assert_next
-@@ -236,8 +280,16 @@
- end
- 
- def read_properties_changed(out, lines, path)
-+  prev_rev= $revision-1
-+  next_rev= $revision
-   lines.assert_next(/^_+$/)
-   return unless lines.next_line
-+  out.puts "#V #{prev_rev},#{next_rev}"
-+  out.puts "#P #{$shortrepo}/#{path}"
-+# The first three get consumed and not highlighted
-+  out.puts "#U "
-+  out.puts "#U Property changes:"
-+  out.puts "#U "
-   while true
-     break unless lines.current =~ /^Name: (.+)$/
-     prop_name = $1
-@@ -254,13 +306,49 @@
-       munch_prop_text(path, prop_name, $revision, lines, line0)
-       lines.next_line
-     end
-+    out.puts "#U #{m[1]} #{prop_name}:#{m[2]}"
-   end
-+  out.puts "#U "
- end
- 
- def handle_copy(out, lines, path, from_ref, from_file)
--  # TODO: handle file copies in email
-+  prev_rev= $revision-1
-+  next_rev= $revision
-+  out.puts "#V #{$shortrepo}/#{from_file}:#{prev_rev},#{next_rev}"
-+  out.puts "#C #{$shortrepo}/#{path}"
-+  if lines.next_line && lines.current =~ /^=+$/
-+    m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
-+    prev_rev = m[1].to_i
-+    diff1 = lines.current
-+    m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
-+    next_rev = m[1].to_i
-+    diff2 = lines.current
-+    out.puts "#U #{diff1}"
-+    out.puts "#U #{diff2}"
-+    while lines.next_line && lines.current =~ /^[-\+ @\\]/
-+      out.puts "#U #{lines.current}"
-+    end
-+  else
-+    out.puts "#U "
-+    out.puts "#U Copied from #{$shortrepo}/#{from_file}:#{from_ref}"
-+    out.puts "#U "
-+  end
- end
- 
-+def svnlook_author
-+  svnlook("author", $revision) do |io|
-+    return io.readline
-+  end
-+  nil
-+end
-+
-+def find_author
-+  return if $passthrough_args.include?("--from")
-+  author = svnlook_author
-+  if author
-+    $passthrough_args << "--from" << author
-+  end
-+end
- 
- def process_svnlook_log(file)
-   svnlook("log", $revision) do |io|
-@@ -294,16 +382,17 @@
- end
- 
- def process_commit()
--    File.open("#{$datadir}/logfile", File::WRONLY|File::CREAT) do |file|
--      process_svnlook_log(file)
--      process_svnlook_diff(file)
--    end
-+  File.open("#{$datadir}/logfile", File::WRONLY|File::CREAT) do |file|
-+    process_svnlook_log(file)
-+    process_svnlook_diff(file)
-+  end
- end
- 
- 
- def main
-   init()
-   process_args()
-+  find_author()
-   process_commit()
-   send_email()
-   cleanup()
