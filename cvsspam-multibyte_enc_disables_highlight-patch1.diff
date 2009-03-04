@@ -1,7 +1,5 @@
-Index: cvsspam.rb
-===================================================================
---- cvsspam.rb	(revision 255)
-+++ cvsspam.rb	(working copy)
+--- cvsspam.rb	(working copy)
++++ cvsspam.rb	2009-03-05 01:48:46.419779119 +0200
 @@ -936,7 +936,10 @@
          addInfixSize = line.length - (prefixLen+suffixLen)
          oversize_change = deleteInfixSize*100/@lineJustDeleted.length>33 || addInfixSize*100/line.length>33
@@ -14,6 +12,15 @@ Index: cvsspam.rb
            print(htmlEncode(@lineJustDeleted))
          else
            print(htmlEncode(@lineJustDeleted[0,prefixLen]))
+@@ -1118,7 +1121,7 @@
+         @lineJustDeleted = nil
+       end
+       shift(initial)
+-      if prefixLen==1 && suffixLen==0 || addInfixSize<=0 || oversize_change
++      if multibyte_encoding? || prefixLen==1 && suffixLen==0 || addInfixSize<=0 || oversize_change
+         encoded = htmlEncode(line)
+       else
+         encoded = htmlEncode(line[0,prefixLen]) +
 @@ -1297,6 +1300,11 @@
    end
  end
