@@ -589,3 +589,252 @@
    mail.header("MIME-Version", "1.0")
    mail.header("Content-Type", "text/html" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
    if ENV['REMOTE_HOST']
+--- cvsspam-0.2.12/svn_post_commit_hook.rb	2005-07-11 18:53:29.000000000 +0300
++++ cvsspam/cvsspam-svn/svn_post_commit_hook.rb	2008-08-07 17:27:52.628725224 +0300
+@@ -34,7 +34,7 @@
+ 
+ def send_email
+   cmd = File.dirname($0) + "/cvsspam.rb"
+-  unless system(cmd, "#{$datadir}/logfile", *$passthrough_args)
++  unless system(cmd,"--svn","#{$datadir}/logfile", *$passthrough_args)
+     fail "problem running '#{cmd}'"
+   end
+ end
+@@ -86,6 +86,8 @@
+   unless FileTest.directory?($repository)
+     usage("no such directory: #{$repository.inspect}")
+   end
++  $repository =~ /([^\/]+$)/ 
++  $shortrepo = $1
+ end
+ 
+ # runs the given svnlook subcommand
+@@ -123,16 +125,6 @@
+ end
+ 
+ 
+-def each_changed
+-  svnlook("changed", $revision) do |io|
+-    io.each_line do |line|
+-      line =~ /^(.)(.)  (.*)$/
+-      yield Change.new($1, $2, $3)
+-    end
+-  end
+-end
+-
+-
+ 
+ # Line-oriented access to an underlying IO object.  Remembers 'current' line
+ # for lookahead during parsing.
+@@ -149,10 +141,15 @@
+     (@line = @io.gets) != nil
+   end
+ 
++  def assert_current(re)
++    raise "unexpected #{current.inspect}" unless @line =~ re
++    $~
++  end
++
+   def assert_next(re=nil)
+     raise "unexpected end of text" unless next_line
+     unless re.nil?
+-      raise "unexpected #{lines.current.inspect}" unless @line =~ re
++      raise "unexpected #{current.inspect}" unless @line =~ re
+     end
+     $~
+   end
+@@ -161,14 +158,34 @@
+ 
+ def read_modified_diff(out, lines, path)
+   lines.assert_next(/^=+$/)
+-  m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
++  lines.assert_next
++  if lines.current =~ /\(Binary files differ\)/
++    process_modified_binary_diff(out, lines, path)
++  else
++    process_modified_text_diff(out, lines, path)
++  end
++end
++
++
++def process_modified_binary_diff(out, lines, path)
++  prev_rev= $revision-1
++  next_rev= $revision
++  out.puts "#V #{prev_rev},#{next_rev}"
++  out.puts "#M #{$shortrepo}/#{path}"
++  out.puts "#U diff x x"
++  out.puts "#U Binary files x and y differ"
++end
++
++
++def process_modified_text_diff(out, lines, path)
++  m = lines.assert_current(/^---.*\(rev (\d+)\)$/)
+   prev_rev = m[1].to_i
+   diff1 = lines.current
+   m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
+   next_rev = m[1].to_i
+   diff2 = lines.current
+   out.puts "#V #{prev_rev},#{next_rev}"
+-  out.puts "#M #{path}"
++  out.puts "#M #{$shortrepo}/#{path}"
+   out.puts "#U #{diff1}"
+   out.puts "#U #{diff2}"
+   while lines.next_line && lines.current =~ /^[-\+ @\\]/
+@@ -178,14 +195,31 @@
+ 
+ def read_added_diff(out, lines, path)
+   lines.assert_next(/^=+$/)
+-  m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
++  lines.assert_next
++  if lines.current =~ /\(Binary files differ\)/
++    process_added_binary_diff(out, lines, path)
++  else
++    process_added_text_diff(out, lines, path)
++  end
++end
++
++def process_added_binary_diff(out, lines, path)
++  next_rev= $revision
++  out.puts "#V NONE,#{next_rev}"
++  out.puts "#A #{$shortrepo}/#{path}"
++  out.puts "#U diff x x"
++  out.puts "#U Binary file x added"
++end
++
++def process_added_text_diff(out, lines, path)
++  m = lines.assert_current(/^---.*\(rev (\d+)\)$/)
+   prev_rev = m[1].to_i
+   diff1 = lines.current
+   m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
+   next_rev = m[1].to_i
+   diff2 = lines.current
+   out.puts "#V NONE,#{next_rev}"
+-  out.puts "#A #{path}"
++  out.puts "#A #{$shortrepo}/#{path}"
+   out.puts "#U #{diff1}"
+   out.puts "#U #{diff2}"
+   while lines.next_line && lines.current =~ /^[-\+ @\\]/
+@@ -202,7 +236,7 @@
+   next_rev = m[1].to_i
+   diff2 = lines.current
+   out.puts "#V #{prev_rev},NONE"
+-  out.puts "#R #{path}"
++  out.puts "#R #{$shortrepo}/#{path}"
+   out.puts "#U #{diff1}"
+   out.puts "#U #{diff2}"
+   while lines.next_line && lines.current =~ /^[-\+ @\\]/
+@@ -221,13 +255,23 @@
+ end
+ 
+ def assert_prop_match(a, b)
+-  if a != b
++  if !b.nil? && a != b
+     raise "property mismatch: #{a.inspect}!=#{b.inspect}"
+   end
+ end
+ 
++# We need to read the property change from the output of svnlook, but have
++# a difficulty in that there's no unambiguous delimiter marking the end of
++# a potentially multi-line property value.  Therefore, we do a seperate
++# svn propget on the given file to get the value of the property on its own,
++# and then use that value as a guide as to how much data to read from the
++# svnlook output.
+ def munch_prop_text(path, prop_name, revision, lines, line0)
+   prop = read_property_lines(path, prop_name, revision)
++  if prop.empty?
++    assert_prop_match(line0, "")
++    return
++  end
+   assert_prop_match(line0, prop.shift)
+   prop.each do |prop_line|
+     lines.assert_next
+@@ -236,8 +280,16 @@
+ end
+ 
+ def read_properties_changed(out, lines, path)
++  prev_rev= $revision-1
++  next_rev= $revision
+   lines.assert_next(/^_+$/)
+   return unless lines.next_line
++  out.puts "#V #{prev_rev},#{next_rev}"
++  out.puts "#P #{$shortrepo}/#{path}"
++# The first three get consumed and not highlighted
++  out.puts "#U "
++  out.puts "#U Property changes:"
++  out.puts "#U "
+   while true
+     break unless lines.current =~ /^Name: (.+)$/
+     prop_name = $1
+@@ -254,13 +306,49 @@
+       munch_prop_text(path, prop_name, $revision, lines, line0)
+       lines.next_line
+     end
++    out.puts "#U #{m[1]} #{prop_name}:#{m[2]}"
+   end
++  out.puts "#U "
+ end
+ 
+ def handle_copy(out, lines, path, from_ref, from_file)
+-  # TODO: handle file copies in email
++  prev_rev= $revision-1
++  next_rev= $revision
++  out.puts "#V #{$shortrepo}/#{from_file}:#{prev_rev},#{next_rev}"
++  out.puts "#C #{$shortrepo}/#{path}"
++  if lines.next_line && lines.current =~ /^=+$/
++    m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
++    prev_rev = m[1].to_i
++    diff1 = lines.current
++    m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++    next_rev = m[1].to_i
++    diff2 = lines.current
++    out.puts "#U #{diff1}"
++    out.puts "#U #{diff2}"
++    while lines.next_line && lines.current =~ /^[-\+ @\\]/
++      out.puts "#U #{lines.current}"
++    end
++  else
++    out.puts "#U "
++    out.puts "#U Copied from #{$shortrepo}/#{from_file}:#{from_ref}"
++    out.puts "#U "
++  end
+ end
+ 
++def svnlook_author
++  svnlook("author", $revision) do |io|
++    return io.readline
++  end
++  nil
++end
++
++def find_author
++  return if $passthrough_args.include?("--from")
++  author = svnlook_author
++  if author
++    $passthrough_args << "--from" << author
++  end
++end
+ 
+ def process_svnlook_log(file)
+   svnlook("log", $revision) do |io|
+@@ -294,16 +382,17 @@
+ end
+ 
+ def process_commit()
+-    File.open("#{$datadir}/logfile", File::WRONLY|File::CREAT) do |file|
+-      process_svnlook_log(file)
+-      process_svnlook_diff(file)
+-    end
++  File.open("#{$datadir}/logfile", File::WRONLY|File::CREAT) do |file|
++    process_svnlook_log(file)
++    process_svnlook_diff(file)
++  end
+ end
+ 
+ 
+ def main
+   init()
+   process_args()
++  find_author()
+   process_commit()
+   send_email()
+   cleanup()
