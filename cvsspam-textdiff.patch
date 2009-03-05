@@ -1,4 +1,4 @@
---- ../cvsspam2/cvsspam-0.2.12/cvsspam.rb	2005-07-11 16:53:29.000000000 +0100
+--- cvsspam.rb	2005-07-11 16:53:29.000000000 +0100
 +++ cvsspam.rb	2007-09-21 11:08:17.000000000 +0100
 @@ -590,6 +590,42 @@
    end
@@ -614,3 +614,33 @@
 +    make_html_email(body, boundary)
    end
  end
+--- cvsspam.rb	2009-03-05 02:14:14.149660640 +0200
++++ cvsspam.rb	2009-03-05 02:06:57.409693131 +0200
+@@ -1943,8 +1943,9 @@
+ # generate the email header (and footer) having already generated the diffs
+ # for the email body to a temp file (which is simply included in the middle)
+ def make_html_email(mail, boundary)
++
+   mail.puts("--#{boundary}")
+-  mail.puts("Content-Type: text/html;" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
++  mail.puts("Content-Type: text/html" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
+   mail.puts("Content-Disposition: inline\n\n");
+   mail.puts(<<HEAD)
+ <html>
+@@ -2378,12 +2379,10 @@
+ end
+ 
+ def make_text_email(mail, boundary)
+-  mail.puts(<<HEAD)
+---#{boundary}
+-Content-Type: text/plain; charset=us-ascii
+-Content-Disposition: inline
+-
+-HEAD
++  
++  mail.puts("--#{boundary}")
++  mail.puts("Content-Type: text/plain" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
++  mail.puts("Content-Disposition: inline\n\n");
+ 
+   haveTags = false
+   Repository.each do |repository|
