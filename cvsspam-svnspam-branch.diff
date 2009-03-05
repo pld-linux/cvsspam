@@ -1,6 +1,6 @@
 --- svn_post_commit_hook.rb	(.../trunk)	(revision 0)
-+++ svn_post_commit_hook.rb	(.../branches/svn_support)	(revision 265)
-@@ -0,0 +1,409 @@
++++ svn_post_commit_hook.rb	(.../branches/svn_support)	(revision 269)
+@@ -0,0 +1,412 @@
 +#!/usr/bin/ruby -w
 +
 +$svnlook_exe = "svnlook"  # default assumes the program is in $PATH
@@ -16,6 +16,7 @@
 +  end
 +end
 +
++$debug = false
 +$tmpdir = ENV["TMPDIR"] || "/tmp"
 +$dirtemplate = "#svnspam.#{Process.getpgrp}.#{Process.uid}"
 +# arguments to pass though to 'cvsspam.rb'
@@ -299,8 +300,10 @@
 +  out.puts "#U "
 +  out.puts "#U Property changes:"
 +  out.puts "#U "
++
 +  while true
-+    break unless lines.current =~ /^Name: (.+)$/
++    break unless lines.current =~ /^(?:Name|Added|Deleted): (.+)$/
++
 +    prop_name = $1
 +    m = lines.assert_next(/^   ([-+]) (.*)/)
 +    op = m[1]
@@ -385,7 +388,7 @@
 +      elsif lines.current == "\n"
 +	# ignore
 +      else
-+	raise "unable to parse line #{lines.current.inspect}"
++	raise "unable to parse line '#{lines.current.inspect}'"
 +      end
 +    end
 +  end
@@ -410,8 +413,8 @@
 +
 +
 +main
---- cvsspam.rb	(.../trunk)	(revision 265)
-+++ cvsspam.rb	(.../branches/svn_support)	(revision 265)
+--- cvsspam.rb	(.../trunk)	(revision 269)
++++ cvsspam.rb	(.../branches/svn_support)	(revision 269)
 @@ -398,7 +398,7 @@
  
    # the full path and filename within the repository

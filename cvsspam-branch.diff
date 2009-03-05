@@ -1,7 +1,7 @@
 Index: cvsspam.conf
 ===================================================================
---- cvsspam.conf	(.../tags/RELEASE-0_2_12)	(revision 265)
-+++ cvsspam.conf	(.../trunk)	(revision 265)
+--- cvsspam.conf	(.../tags/RELEASE-0_2_12)	(revision 269)
++++ cvsspam.conf	(.../trunk)	(revision 269)
 @@ -34,11 +34,19 @@
  #
  #     When $jiraURL is given, text of the form 'project-1234' will be linked
@@ -22,7 +22,15 @@ Index: cvsspam.conf
  
  # Link to Wiki systems
  # 
-@@ -125,6 +133,15 @@
+@@ -71,6 +79,7 @@
+ 
+ #$cvswebURL = "http://localhost/cgi-bin/cvsweb.cgi"
+ 
++#$tracURL = "http://localhost/trac/project"
+ 
+ 
+ # Additional SMTP Headers                                            (Optional)
+@@ -125,6 +134,15 @@
  #$diff_ignore_keywords = true
  
  
@@ -38,12 +46,45 @@ Index: cvsspam.conf
  # $no_removed_file_diff and $no_added_file_diff
  #
  #     Set both these options, and emails will only include diffs for files
-@@ -177,3 +194,13 @@
+@@ -166,14 +184,46 @@
+ #     Allows the specification of a character set for all generated emails.
+ #   The files CVS is dealing with should already be in the character set you
+ #   specify -- no transcoding is done.
++#
++#   Note that you can override this with --charset argument per module, etc.
+ 
+ #$charset="ISO-8859-1"
+ 
+ 
+ 
++# Users file                                  (Default: $CVSROOT/CVSROOT/users)
++#
++#      Specify users file to lookup From addresses for commites
++
++#$users_file = "/srv/svn/users"
++
++# Users file charset                                        (Default: $charset)
++#
++#      If the users file is encoded differently than $charset, You can override
++#   it here. Especially useful if you use --charset argument. See above.
++
++#$users_file_charset = "ISO-8859-1"
++
++
+ # File names in Subject                      (Default: no filenames in Subject)
+ #
+ #     Some people like file names to appear in the email subject.  To make
  #   them happy, you can say $files_in_subject = true here.
  
  #$files_in_subject = false
 +
 +
++# Module Path email header           (Default: no X-CVSspam-Module-Path header)
++#
++#     Sets 'X-CVSspam-Module-Path' header to contain common path of files commited.
++#   Useful for server side mail filtering.
++
++#$cvsroot_email_header = true
 +
 +# Email size limit                                        (Default: around 2MB)
 +#
@@ -52,10 +93,16 @@ Index: cvsspam.conf
 +#   more diffs onto.  Specify the number of bytes.
 +
 +#$mail_size_limit = 2097152
+
+Property changes on: cvsspam.conf
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
 Index: collect_diffs.rb
 ===================================================================
---- collect_diffs.rb	(.../tags/RELEASE-0_2_12)	(revision 265)
-+++ collect_diffs.rb	(.../trunk)	(revision 265)
+--- collect_diffs.rb	(.../tags/RELEASE-0_2_12)	(revision 269)
++++ collect_diffs.rb	(.../trunk)	(revision 269)
 @@ -27,6 +27,13 @@
  $dirtemplate = "#cvsspam.#{Process.getpgrp}.#{Process.uid}"
  
@@ -131,8 +178,8 @@ Index: collect_diffs.rb
  blah("CVSROOT is #{ENV['CVSROOT']}")
 Index: record_lastdir.rb
 ===================================================================
---- record_lastdir.rb	(.../tags/RELEASE-0_2_12)	(revision 265)
-+++ record_lastdir.rb	(.../trunk)	(revision 265)
+--- record_lastdir.rb	(.../tags/RELEASE-0_2_12)	(revision 269)
++++ record_lastdir.rb	(.../trunk)	(revision 269)
 @@ -4,7 +4,6 @@
  #   http://www.badgers-in-foil.co.uk/projects/cvsspam/
  # Copyright (c) David Holroyd
@@ -178,12 +225,24 @@ Index: record_lastdir.rb
  $datadir = find_data_dir()
  
  if $datadir==nil
+
+Property changes on: TODO
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
 Index: project.xml
 ===================================================================
+
+Property changes on: COPYING
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
 Index: CREDITS
 ===================================================================
---- CREDITS	(.../tags/RELEASE-0_2_12)	(revision 265)
-+++ CREDITS	(.../trunk)	(revision 265)
+--- CREDITS	(.../tags/RELEASE-0_2_12)	(revision 269)
++++ CREDITS	(.../trunk)	(revision 269)
 @@ -29,3 +29,10 @@
    Elan Ruusamäe
    Steve Fox
@@ -197,8 +256,8 @@ Index: CREDITS
 +  Charles Duffy
 Index: cvsspam-doc.xml
 ===================================================================
---- cvsspam-doc.xml	(.../tags/RELEASE-0_2_12)	(revision 265)
-+++ cvsspam-doc.xml	(.../trunk)	(revision 265)
+--- cvsspam-doc.xml	(.../tags/RELEASE-0_2_12)	(revision 269)
++++ cvsspam-doc.xml	(.../trunk)	(revision 269)
 @@ -452,6 +452,23 @@
  </screen></informalexample>
        </para>
@@ -223,10 +282,16 @@ Index: cvsspam-doc.xml
  </section>
  
  <section><title>CVS Web Frontends</title>
+
+Property changes on: cvsspam-doc.xml
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
 Index: cvsspam.rb
 ===================================================================
---- cvsspam.rb	(.../tags/RELEASE-0_2_12)	(revision 265)
-+++ cvsspam.rb	(.../trunk)	(revision 265)
+--- cvsspam.rb	(.../tags/RELEASE-0_2_12)	(revision 269)
++++ cvsspam.rb	(.../trunk)	(revision 269)
 @@ -20,6 +20,7 @@
  
  $version = "0.2.12"
@@ -675,3 +740,33 @@ Index: cvsspam.rb
  
    mail.body do |body|
      make_html_email(body)
+
+Property changes on: testcases/data/remove.png
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
+
+Property changes on: testcases/data/fiddlyedits.after
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
+
+Property changes on: testcases/data/fiddlyedits.before
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
+
+Property changes on: testcases/data/add.png
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
+
+Property changes on: testcases/README
+___________________________________________________________________
+Deleted: svn:executable
+   - *
+
