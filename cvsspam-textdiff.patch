@@ -644,3 +644,39 @@
  
    haveTags = false
    Repository.each do |repository|
+--- cvsspam.rb	2009-03-05 02:40:37.616133405 +0200
++++ cvsspam.rb	2009-03-05 02:38:55.616141228 +0200
+@@ -1375,15 +1375,15 @@
+       when "A"
+         print($frontend.textpath($file.basedir, $file.tag))
+         println("\n")
+-        println("#{$file.file} added at #{$frontend.version($file.path,$file.toVer)}")
++        println("#{$file.file} added at #{$file.toVer}")
+       when "R"
+         print($frontend.textpath($file.basedir, $file.tag))
+         println("\n")
+-        println("#{$file.file} removed after #{$frontend.version($file.path,$file.fromVer)}")
++        println("#{$file.file} removed after #{$file.fromVer}")
+       when "M"
+         print($frontend.textpath($file.basedir, $file.tag))
+         println("\n")
+-        println("#{$file.file} #{$frontend.version($file.path,$file.fromVer)} #{$frontend.textdiff($file)} #{$frontend.version($file.path,$file.toVer)}")
++        println("#{$file.file} #{$file.fromVer} #{$frontend.textdiff($file)} #{$file.toVer}")
+     end
+     lines.each do |line|
+       println(line)
+@@ -2475,11 +2475,11 @@
+       end
+     end
+     if file.addition?
+-      mail.print("added #{$frontend.version(file.path,file.toVer)} ")
++      mail.print("added #{file.toVer} ")
+     elsif file.removal?
+-      mail.print("#{$frontend.version(file.path,file.fromVer)} removed ")
++      mail.print("#{file.fromVer} removed ")
+     elsif file.modification?
+-      mail.print("#{$frontend.version(file.path,file.fromVer)} #{$frontend.textdiff(file)} #{$frontend.version(file.path,file.toVer)} ")
++      mail.print("#{file.fromVer} #{$frontend.textdiff(file)} #{file.toVer} ")
+     end
+ 
+     mail.puts("\n")
