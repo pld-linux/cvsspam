@@ -680,3 +680,22 @@
      end
  
      mail.puts("\n")
+--- cvsspam.rb	2009-03-05 19:26:38.950116565 +0200
++++ cvsspam.rb	2009-03-05 16:29:57.947827866 +0200
+@@ -1862,12 +1862,16 @@
+ 		 "T" => tagHandler,
+ 		 "A" => TextAddedFileHandler.new,
+ 		 "R" => TextRemovedFileHandler.new,
++		 "C" => CopiedFileHandler.new,
+ 		 "M" => TextModifiedFileHandler.new,
++		 "P" => ModifiedPropsFileHandler.new,
+ 		 "V" => VersionHandler.new]
+ 
+ $texthandlers["A"].setTagHandler(tagHandler)
+ $texthandlers["R"].setTagHandler(tagHandler)
++$texthandlers["C"].setTagHandler(tagHandler)
+ $texthandlers["M"].setTagHandler(tagHandler)
++$texthandlers["P"].setTagHandler(tagHandler)
+ 
+ $fileEntries = Array.new
+ $task_list = Array.new
