@@ -1,7 +1,7 @@
 Index: cvsspam.conf
 ===================================================================
---- cvsspam.conf	(.../tags/RELEASE-0_2_12)	(revision 269)
-+++ cvsspam.conf	(.../trunk)	(revision 269)
+--- cvsspam.conf	(.../tags/RELEASE-0_2_12)	(revision 274)
++++ cvsspam.conf	(.../trunk)	(revision 274)
 @@ -34,11 +34,19 @@
  #
  #     When $jiraURL is given, text of the form 'project-1234' will be linked
@@ -30,7 +30,14 @@ Index: cvsspam.conf
  
  
  # Additional SMTP Headers                                            (Optional)
-@@ -125,6 +134,15 @@
+@@ -119,12 +128,21 @@
+ # cvsdiff keyword ignoring                  (Default: show changes in keywords)
+ #
+ #     Changes in CVS keywords can be distracting.  For instance, the
+-#   $Revision$ keyword will change on each commit.  Set this value to true
++#   $Revision$ keyword will change on each commit.  Set this value to true
+ #   to exclude changes in keyword fields (adds the -kk option to cvs diff).
+ 
  #$diff_ignore_keywords = true
  
  
@@ -98,11 +105,14 @@ Property changes on: cvsspam.conf
 ___________________________________________________________________
 Deleted: svn:executable
    - *
+Modified: svn:keywords
+   - Author Date Id Revision
+   + Author Date Id
 
 Index: collect_diffs.rb
 ===================================================================
---- collect_diffs.rb	(.../tags/RELEASE-0_2_12)	(revision 269)
-+++ collect_diffs.rb	(.../trunk)	(revision 269)
+--- collect_diffs.rb	(.../tags/RELEASE-0_2_12)	(revision 274)
++++ collect_diffs.rb	(.../trunk)	(revision 274)
 @@ -27,6 +27,13 @@
  $dirtemplate = "#cvsspam.#{Process.getpgrp}.#{Process.uid}"
  
@@ -178,8 +188,8 @@ Index: collect_diffs.rb
  blah("CVSROOT is #{ENV['CVSROOT']}")
 Index: record_lastdir.rb
 ===================================================================
---- record_lastdir.rb	(.../tags/RELEASE-0_2_12)	(revision 269)
-+++ record_lastdir.rb	(.../trunk)	(revision 269)
+--- record_lastdir.rb	(.../tags/RELEASE-0_2_12)	(revision 274)
++++ record_lastdir.rb	(.../trunk)	(revision 274)
 @@ -4,7 +4,6 @@
  #   http://www.badgers-in-foil.co.uk/projects/cvsspam/
  # Copyright (c) David Holroyd
@@ -233,6 +243,428 @@ Deleted: svn:executable
 
 Index: project.xml
 ===================================================================
+Index: svn_post_commit_hook.rb
+===================================================================
+--- svn_post_commit_hook.rb	(.../tags/RELEASE-0_2_12)	(revision 0)
++++ svn_post_commit_hook.rb	(.../trunk)	(revision 274)
+@@ -0,0 +1,410 @@
++#!/usr/bin/ruby -w
++
++$svnlook_exe = "svnlook"  # default assumes the program is in $PATH
++
++def usage(msg)
++  $stderr.puts(msg)
++  exit(1)
++end
++
++def blah(msg)
++  if $debug
++    $stderr.puts "svn_post_commit_hook.rb: #{msg}"
++  end
++end
++
++$debug = false
++$tmpdir = ENV["TMPDIR"] || "/tmp"
++$dirtemplate = "#svnspam.#{Process.getpgrp}.#{Process.uid}"
++# arguments to pass though to 'cvsspam.rb'
++$passthrough_args = []
++
++def make_data_dir
++  dir = "#{$tmpdir}/#{$dirtemplate}-#{rand(99999999)}"
++  Dir.mkdir(dir, 0700)
++  dir
++end
++
++def init
++  $datadir = make_data_dir
++
++  # set PWD so that svnlook can create its .svnlook directory
++  Dir.chdir($datadir)
++end
++
++def cleanup
++  unless $debug
++	  File.unlink("#{$datadir}/logfile")
++	  Dir.rmdir($datadir)
++  end
++end
++
++def send_email
++  cmd = File.dirname($0) + "/cvsspam.rb"
++  unless system(cmd,"--svn","#{$datadir}/logfile", *$passthrough_args)
++    fail "problem running '#{cmd}'"
++  end
++end
++
++# Like IO.popen, but accepts multiple arguments like Kernel.exec
++# (So no need to escape shell metacharacters)
++def safer_popen(*args)
++  IO.popen("-") do |pipe|
++    if pipe==nil
++      exec(*args)
++    else
++      yield pipe
++    end
++  end
++end
++
++
++# Process the command-line arguments in the given list
++def process_args
++  require 'getoptlong'
++
++  opts = GetoptLong.new(
++    [ "--to",     "-t", GetoptLong::REQUIRED_ARGUMENT ],
++    [ "--config", "-c", GetoptLong::REQUIRED_ARGUMENT ],
++    [ "--debug",  "-d", GetoptLong::NO_ARGUMENT ],
++    [ "--from",   "-u", GetoptLong::REQUIRED_ARGUMENT ],
++    [ "--charset",      GetoptLong::REQUIRED_ARGUMENT ]
++  )
++
++  opts.each do |opt, arg|
++    if ["--to", "--config", "--from", "--charset"].include?(opt)
++      $passthrough_args << opt << arg
++    end
++    if ["--debug"].include?(opt)
++      $passthrough_args << opt
++    end
++    $config = arg if opt=="--config"
++    $debug = true if opt == "--debug"
++  end
++
++  $repository = ARGV[0]
++  $revision = ARGV[1]
++
++  unless $revision =~ /^\d+$/
++    usage("revision must be an integer: #{revision.inspect}")
++  end
++  $revision = $revision.to_i
++
++  unless FileTest.directory?($repository)
++    usage("no such directory: #{$repository.inspect}")
++  end
++end
++
++# runs the given svnlook subcommand
++def svnlook(cmd, revision, *args)
++  rev = revision.to_s
++  safer_popen($svnlook_exe, cmd, $repository, "-r", rev, *args) do |io|
++    yield io
++  end
++end
++
++class Change
++  def initialize(filechange, propchange, path)
++    @filechange = filechange
++    @propchange = propchange
++    @path = path
++  end
++
++  attr_accessor :filechange, :propchange, :path
++
++  def property_change?
++    @propchange != " "
++  end
++
++  def file_change?
++    @filechange != "_"
++  end
++
++  def addition?
++    @filechange == "A"
++  end
++
++  def deletion?
++    @filechange == "D"
++  end
++end
++
++
++
++# Line-oriented access to an underlying IO object.  Remembers 'current' line
++# for lookahead during parsing.
++class LineReader
++  def initialize(io)
++    @io = io
++  end
++
++  def current
++    @line
++  end
++
++  def next_line
++    (@line = @io.gets) != nil
++  end
++
++  def assert_current(re)
++    raise "unexpected #{current.inspect}" unless @line =~ re
++    $~
++  end
++
++  def assert_next(re=nil)
++    raise "unexpected end of text" unless next_line
++    unless re.nil?
++      raise "unexpected #{current.inspect}" unless @line =~ re
++    end
++    $~
++  end
++end
++
++
++def read_modified_diff(out, lines, path)
++  lines.assert_next(/^=+$/)
++  lines.assert_next
++  if lines.current =~ /\(Binary files differ\)/
++    process_modified_binary_diff(out, lines, path)
++  else
++    process_modified_text_diff(out, lines, path)
++  end
++end
++
++
++def process_modified_binary_diff(out, lines, path)
++  prev_rev= $revision-1
++  next_rev= $revision
++  out.puts "#V #{prev_rev},#{next_rev}"
++  out.puts "#M #{path}"
++  out.puts "#U diff x x"
++  out.puts "#U Binary files x and y differ"
++end
++
++
++def process_modified_text_diff(out, lines, path)
++  m = lines.assert_current(/^---.*\(rev (\d+)\)$/)
++  prev_rev = m[1].to_i
++  diff1 = lines.current
++  m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++  next_rev = m[1].to_i
++  diff2 = lines.current
++  out.puts "#V #{prev_rev},#{next_rev}"
++  out.puts "#M #{path}"
++  out.puts "#U #{diff1}"
++  out.puts "#U #{diff2}"
++  while lines.next_line && lines.current =~ /^[-\+ @\\]/
++    out.puts "#U #{lines.current}"
++  end
++end
++
++def read_added_diff(out, lines, path)
++  lines.assert_next(/^=+$/)
++  lines.assert_next
++  if lines.current =~ /\(Binary files differ\)/
++    process_added_binary_diff(out, lines, path)
++  else
++    process_added_text_diff(out, lines, path)
++  end
++end
++
++def process_added_binary_diff(out, lines, path)
++  next_rev= $revision
++  out.puts "#V NONE,#{next_rev}"
++  out.puts "#A #{path}"
++  out.puts "#U diff x x"
++  out.puts "#U Binary file x added"
++end
++
++def process_added_text_diff(out, lines, path)
++  m = lines.assert_current(/^---.*\(rev (\d+)\)$/)
++  prev_rev = m[1].to_i
++  diff1 = lines.current
++  m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++  next_rev = m[1].to_i
++  diff2 = lines.current
++  out.puts "#V NONE,#{next_rev}"
++  out.puts "#A #{path}"
++  out.puts "#U #{diff1}"
++  out.puts "#U #{diff2}"
++  while lines.next_line && lines.current =~ /^[-\+ @\\]/
++    out.puts "#U #{lines.current}"
++  end
++end
++
++def read_deleted_diff(out, lines, path)
++  lines.assert_next(/^=+$/)
++  m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
++  prev_rev = m[1].to_i
++  diff1 = lines.current
++  m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++  next_rev = m[1].to_i
++  diff2 = lines.current
++  out.puts "#V #{prev_rev},NONE"
++  out.puts "#R #{path}"
++  out.puts "#U #{diff1}"
++  out.puts "#U #{diff2}"
++  while lines.next_line && lines.current =~ /^[-\+ @\\]/
++    out.puts "#U #{lines.current}"
++  end
++end
++
++def read_property_lines(path, prop_name, revision)
++  lines = []
++  svnlook("propget", revision, prop_name, path) do |io|
++    io.each_line do |line|
++      lines << line.chomp
++    end
++  end
++  lines
++end
++
++def assert_prop_match(a, b)
++  if !b.nil? && a != b
++    raise "property mismatch: #{a.inspect}!=#{b.inspect}"
++  end
++end
++
++# We need to read the property change from the output of svnlook, but have
++# a difficulty in that there's no unambiguous delimiter marking the end of
++# a potentially multi-line property value.  Therefore, we do a seperate
++# svn propget on the given file to get the value of the property on its own,
++# and then use that value as a guide as to how much data to read from the
++# svnlook output.
++def munch_prop_text(path, prop_name, revision, lines, line0)
++  prop = read_property_lines(path, prop_name, revision)
++  if prop.empty?
++    assert_prop_match(line0, "")
++    return
++  end
++  assert_prop_match(line0, prop.shift)
++  prop.each do |prop_line|
++    lines.assert_next
++    assert_prop_match(lines.current.chomp, prop_line)
++  end
++end
++
++def read_properties_changed(out, lines, path)
++  prev_rev= $revision-1
++  next_rev= $revision
++  lines.assert_next(/^_+$/)
++  return unless lines.next_line
++  out.puts "#V #{prev_rev},#{next_rev}"
++  out.puts "#P #{path}"
++# The first three get consumed and not highlighted
++  out.puts "#U "
++  out.puts "#U Property changes:"
++  out.puts "#U "
++
++  while true
++    break unless lines.current =~ /^(?:Name|Added|Deleted): (.+)$/
++
++    prop_name = $1
++    m = lines.assert_next(/^   ([-+]) (.*)/)
++    op = m[1]
++    line0 = m[2]
++    if op == "-"
++      munch_prop_text(path, prop_name, $revision-1, lines, line0)
++      if lines.next_line && lines.current =~ /^   \+ (.*)/
++	munch_prop_text(path, prop_name, $revision, lines, $1)
++	lines.next_line
++      end
++    else  # op == "+"
++      munch_prop_text(path, prop_name, $revision, lines, line0)
++      lines.next_line
++    end
++    out.puts "#U #{m[1]} #{prop_name}:#{m[2]}"
++  end
++  out.puts "#U "
++end
++
++def handle_copy(out, lines, path, from_ref, from_file)
++  prev_rev= $revision-1
++  next_rev= $revision
++  out.puts "#V #{from_file}:#{prev_rev},#{next_rev}"
++  out.puts "#C #{path}"
++  if lines.next_line && lines.current =~ /^=+$/
++    m = lines.assert_next(/^---.*\(rev (\d+)\)$/)
++    prev_rev = m[1].to_i
++    diff1 = lines.current
++    m = lines.assert_next(/^\+\+\+.*\(rev (\d+)\)$/)
++    next_rev = m[1].to_i
++    diff2 = lines.current
++    out.puts "#U #{diff1}"
++    out.puts "#U #{diff2}"
++    while lines.next_line && lines.current =~ /^[-\+ @\\]/
++      out.puts "#U #{lines.current}"
++    end
++  else
++    out.puts "#U "
++    out.puts "#U Copied from #{from_file}:#{from_ref}"
++    out.puts "#U "
++  end
++end
++
++def svnlook_author
++  svnlook("author", $revision) do |io|
++    return io.readline.chomp
++  end
++  nil
++end
++
++def find_author
++  return if $passthrough_args.include?("--from")
++  author = svnlook_author
++  if author
++    blah("Author from svnlook: '#{author}'")
++    $passthrough_args << "--from" << author
++  end
++end
++
++def process_svnlook_log(file)
++  svnlook("log", $revision) do |io|
++    io.each_line do |line|
++      file.puts("#> #{line}")
++    end
++  end
++end
++
++def process_svnlook_diff(file)
++  svnlook("diff", $revision) do |io|
++    lines = LineReader.new(io)
++    while lines.next_line
++      if lines.current =~ /^Modified:\s+(.*)/
++	read_modified_diff(file, lines, $1)
++      elsif lines.current =~ /^Added:\s+(.*)/
++	read_added_diff(file, lines, $1)
++      elsif lines.current =~ /^Copied:\s+(.*) \(from rev (\d+), (.*)\)$/
++	handle_copy(file, lines, $1, $2, $3)
++      elsif lines.current =~ /^Deleted:\s+(.*)/
++	read_deleted_diff(file, lines, $1)
++      elsif lines.current =~ /^Property changes on:\s+(.*)/
++	read_properties_changed(file, lines, $1)
++      elsif lines.current == "\n"
++	# ignore
++      else
++	raise "unable to parse line '#{lines.current.inspect}'"
++      end
++    end
++  end
++end
++
++def process_commit()
++  File.open("#{$datadir}/logfile", File::WRONLY|File::CREAT) do |file|
++    process_svnlook_log(file)
++    process_svnlook_diff(file)
++  end
++end
++
++
++def main
++  init()
++  process_args()
++  find_author()
++  process_commit()
++  send_email()
++  cleanup()
++end
++
++
++main
+
+Property changes on: svn_post_commit_hook.rb
+___________________________________________________________________
+Added: svn:mergeinfo
+Added: svn:executable
+   + *
+
 
 Property changes on: COPYING
 ___________________________________________________________________
@@ -241,8 +673,8 @@ Deleted: svn:executable
 
 Index: CREDITS
 ===================================================================
---- CREDITS	(.../tags/RELEASE-0_2_12)	(revision 269)
-+++ CREDITS	(.../trunk)	(revision 269)
+--- CREDITS	(.../tags/RELEASE-0_2_12)	(revision 274)
++++ CREDITS	(.../trunk)	(revision 274)
 @@ -29,3 +29,10 @@
    Elan Ruusamäe
    Steve Fox
@@ -256,8 +688,8 @@ Index: CREDITS
 +  Charles Duffy
 Index: cvsspam-doc.xml
 ===================================================================
---- cvsspam-doc.xml	(.../tags/RELEASE-0_2_12)	(revision 269)
-+++ cvsspam-doc.xml	(.../trunk)	(revision 269)
+--- cvsspam-doc.xml	(.../tags/RELEASE-0_2_12)	(revision 274)
++++ cvsspam-doc.xml	(.../trunk)	(revision 274)
 @@ -452,6 +452,23 @@
  </screen></informalexample>
        </para>
@@ -290,8 +722,8 @@ Deleted: svn:executable
 
 Index: cvsspam.rb
 ===================================================================
---- cvsspam.rb	(.../tags/RELEASE-0_2_12)	(revision 269)
-+++ cvsspam.rb	(.../trunk)	(revision 269)
+--- cvsspam.rb	(.../tags/RELEASE-0_2_12)	(revision 274)
++++ cvsspam.rb	(.../trunk)	(revision 274)
 @@ -20,6 +20,7 @@
  
  $version = "0.2.12"
@@ -360,7 +792,46 @@ Index: cvsspam.rb
      @lineAdditions = @lineRemovals = 0
      @repository = Repository.get(path)
      @repository.merge_common_prefix(basedir())
-@@ -533,6 +534,14 @@
+@@ -397,7 +398,7 @@
+ 
+   # the full path and filename within the repository
+   attr_accessor :path
+-  # the type of change committed 'M'=modified, 'A'=added, 'R'=removed
++  # the type of change committed 'M'=modified, 'A'=added, 'R'=removed, 'P'=properties, 'C'=copied
+   attr_accessor :type
+   # records number of 'addition' lines in diff output, once counted
+   attr_accessor :lineAdditions
+@@ -452,17 +453,28 @@
+   def removal?
+     @type == "R"
+   end
+-
++  
+   # was this file added during the commit?
+   def addition?
+     @type == "A"
+   end
+ 
++  # was this file copied during the commit?
++  def copied?
++    @type == "C"
++  end
++
+   # was this file simply modified during the commit?
+   def modification?
+     @type == "M"
+   end
++  
++  # was this file simply modified during the commit?
++  def modifiedprops?
++    @type == "P"
++  end
+ 
++
+   # passing true, this object remembers that a diff will appear in the email,
+   # passing false, this object remembers that no diff will appear in the email.
+   # Once the value is set, it will not be changed
+@@ -533,6 +545,14 @@
  # TODO: consolidate these into a nicer framework,
  mailSub = proc { |match| "<a href=\"mailto:#{match}\">#{match}</a>" }
  urlSub = proc { |match| "<a href=\"#{match}\">#{match}</a>" }
@@ -375,7 +846,7 @@ Index: cvsspam.rb
  bugzillaSub = proc { |match|
    match =~ /([0-9]+)/
    "<a href=\"#{$bugzillaURL.sub(/%s/, $1)}\">#{match}</a>"
-@@ -544,11 +553,27 @@
+@@ -544,11 +564,27 @@
    match =~ /([0-9]+)/
    "<a href=\"#{$ticketURL.sub(/%s/, $1)}\">#{match}</a>"
  }
@@ -404,7 +875,7 @@ Index: cvsspam.rb
  commentSubstitutions = {
  		'(?:mailto:)?[\w\.\-\+\=]+\@[\w\-]+(?:\.[\w\-]+)+\b' => mailSub,
  		'\b(?:http|https|ftp):[^ \t\n<>"]+[\w/]' => urlSub
-@@ -670,6 +695,12 @@
+@@ -670,6 +706,12 @@
    def diff(file)
      '-&gt;'
    end
@@ -417,7 +888,7 @@ Index: cvsspam.rb
  end
  
  # Superclass for objects that can link to CVS frontends on the web (ViewCVS,
-@@ -710,6 +741,14 @@
+@@ -710,6 +752,14 @@
      "<a href=\"#{diff_url(file)}\">#{super(file)}</a>"
    end
  
@@ -432,7 +903,7 @@ Index: cvsspam.rb
   protected
    def add_repo(url)
      if @repository_name
-@@ -722,6 +761,10 @@
+@@ -722,6 +772,10 @@
        url
      end
    end
@@ -443,7 +914,7 @@ Index: cvsspam.rb
  end
  
  # Link to ViewCVS
-@@ -745,6 +788,15 @@
+@@ -745,6 +799,15 @@
    def diff_url(file)
      add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=#{file.fromVer}&amp;r2=#{file.toVer}")
    end
@@ -459,7 +930,7 @@ Index: cvsspam.rb
  end
  
  # Link to Chora, from the Horde framework
-@@ -767,9 +819,9 @@
+@@ -767,9 +830,9 @@
  class CVSwebFrontend < WebFrontend
    def path_url(path, tag)
      if tag == nil
@@ -471,7 +942,7 @@ Index: cvsspam.rb
      end
    end
  
-@@ -780,9 +832,45 @@
+@@ -780,9 +843,45 @@
    def diff_url(file)
      add_repo("#{@base_url}#{urlEncode(file.path)}.diff?r1=text&amp;tr1=#{file.fromVer}&amp;r2=text&amp;tr2=#{file.toVer}&amp;f=h")
    end
@@ -517,7 +988,40 @@ Index: cvsspam.rb
  # in need of refactoring...
  
  # Note when LogReader finds record of a file that was added in this commit
-@@ -958,7 +1046,7 @@
+@@ -801,6 +900,15 @@
+   end
+ end
+ 
++# Note when LogReader finds record of a file that was copied in this commit
++class CopiedFileHandler < FileHandler
++  def handleFile(file)
++    file.type="C"
++    file.fromVer=$fromVer
++    file.toVer=$toVer
++  end
++end
++
+ # Note when LogReader finds record of a file that was modified in this commit
+ class ModifiedFileHandler < FileHandler
+   def handleFile(file)
+@@ -810,7 +918,16 @@
+   end
+ end
+ 
++# Note when LogReader finds record of a file whose properties were modified in this commit
++class ModifiedPropsFileHandler < FileHandler
++  def handleFile(file)
++    file.type="P"
++    file.fromVer=$fromVer
++    file.toVer=$toVer
++  end
++end
+ 
++
+ # Used by UnifiedDiffHandler to record the number of added and removed lines
+ # appearing in a unidiff.
+ class UnifiedDiffStats
+@@ -958,7 +1075,7 @@
      end
      shift(nil)
      if @truncatedLineCount>0
@@ -526,7 +1030,29 @@ Index: cvsspam.rb
      end
    end
  
-@@ -1181,7 +1269,7 @@
+@@ -976,11 +1093,21 @@
+         print($frontend.path($file.basedir, $file.tag))
+         println("</span><br />")
+         println("<div class=\"fileheader\" id=\"removed\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">removed after #{$frontend.version($file.path,$file.fromVer)}</small></div>")
++      when "C"
++        print("<span class=\"pathname\" id=\"copied\">")
++        print($frontend.path($file.basedir, $file.tag))
++        println("</span><br />")
++        println("<div class=\"fileheader\" id=\"copied\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">copied from #{$frontend.version($file.path,$file.fromVer)}</small></div>")
+       when "M"
+         print("<span class=\"pathname\">")
+         print($frontend.path($file.basedir, $file.tag))
+         println("</span><br />")
+         println("<div class=\"fileheader\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">#{$frontend.version($file.path,$file.fromVer)} #{$frontend.diff($file)} #{$frontend.version($file.path,$file.toVer)}</small></div>")
++      when "P"
++        print("<span class=\"pathname\">")
++        print($frontend.path($file.basedir, $file.tag))
++        println("</span><br />")
++        println("<div class=\"fileheader\"><big><b>#{htmlEncode($file.file)}</b></big> <small id=\"info\">#{$frontend.version($file.path,$file.fromVer)} #{$frontend.diff($file)} #{$frontend.version($file.path,$file.toVer)}</small></div>")
+     end
+     print("<pre class=\"diff\"><small id=\"info\">")
+     lines.each do |line|
+@@ -1181,7 +1308,7 @@
  
  # an RFC 822 email address
  class EmailAddress
@@ -535,7 +1061,7 @@ Index: cvsspam.rb
      if text =~ /^\s*([^<]+?)\s*<\s*([^>]+?)\s*>\s*$/
        @personal_name = $1
        @address = $2
-@@ -1189,9 +1277,10 @@
+@@ -1189,9 +1316,10 @@
        @personal_name = nil
        @address = text
      end
@@ -547,7 +1073,7 @@ Index: cvsspam.rb
  
    def has_personal_name?
      return !@personal_name.nil?
-@@ -1222,7 +1311,7 @@
+@@ -1222,7 +1350,7 @@
    # rfc2047 encode the word, if it contains non-ASCII characters
    def encode_word(word)
      if $encoder.requires_rfc2047?(word)
@@ -556,15 +1082,17 @@ Index: cvsspam.rb
        $encoder.each_char_encoded(word) do |code|
  	encoded << code
        end
-@@ -1237,6 +1326,7 @@
+@@ -1237,22 +1365,31 @@
  cvsroot_dir = "#{ENV['CVSROOT']}/CVSROOT"
  $config = "#{cvsroot_dir}/cvsspam.conf"
  $users_file = "#{cvsroot_dir}/users"
 +$users_file_charset = nil
  
  $debug = false
++$svn = false
  $recipients = Array.new
-@@ -1245,14 +1335,21 @@
+ $sendmail_prog = "/usr/sbin/sendmail"
+ $hostname = ENV['HOSTNAME'] || 'localhost'
  $no_removed_file_diff = false
  $no_added_file_diff = false
  $no_diff = false
@@ -587,7 +1115,7 @@ Index: cvsspam.rb
  $from_address = nil
  $subjectPrefix = nil
  $files_in_subject = false;
-@@ -1261,6 +1358,7 @@
+@@ -1261,6 +1398,7 @@
  # 2MiB limit on attached diffs,
  $mail_size_limit = 1024 * 1024 * 2
  $arg_charset = nil
@@ -595,7 +1123,32 @@ Index: cvsspam.rb
  
  require 'getoptlong'
  
-@@ -1321,6 +1419,8 @@
+@@ -1268,6 +1406,7 @@
+   [ "--to",     "-t", GetoptLong::REQUIRED_ARGUMENT ],
+   [ "--config", "-c", GetoptLong::REQUIRED_ARGUMENT ],
+   [ "--debug",  "-d", GetoptLong::NO_ARGUMENT ],
++  [ "--svn",    "-s", GetoptLong::NO_ARGUMENT ],
+   [ "--from",   "-u", GetoptLong::REQUIRED_ARGUMENT ],
+   [ "--charset",      GetoptLong::REQUIRED_ARGUMENT ]
+ )
+@@ -1276,6 +1415,7 @@
+   $recipients << EmailAddress.new(arg) if opt=="--to"
+   $config = arg if opt=="--config"
+   $debug = true if opt=="--debug"
++  $svn = true if opt=="--svn"
+   $from_address = EmailAddress.new(arg) if opt=="--from"
+   # must use different variable as the config is readed later.
+   $arg_charset = arg if opt == "--charset"
+@@ -1288,7 +1428,7 @@
+   else
+     $stderr.puts "missing required file argument"
+   end
+-  puts "Usage: cvsspam.rb [ --to <email> ] [ --config <file> ] <collect_diffs file>"
++  puts "Usage: cvsspam.rb [ --svn ] [ --to <email> ] [ --config <file> ] <collect_diffs file>"
+   exit(-1)
+ end
+ 
+@@ -1321,6 +1461,8 @@
    blah("Config file '#{$config}' not found, ignoring")
  end
  
@@ -604,7 +1157,7 @@ Index: cvsspam.rb
  unless $arg_charset.nil?
    $charset = $arg_charset
  end
-@@ -1337,6 +1437,9 @@
+@@ -1337,6 +1479,9 @@
  elsif $cvswebURL !=nil
    $cvswebURL << "/" unless $cvswebURL =~ /\/$/
    $frontend = CVSwebFrontend.new($cvswebURL)
@@ -614,7 +1167,7 @@ Index: cvsspam.rb
  else
    $frontend = NoFrontend.new
  end
-@@ -1353,17 +1456,35 @@
+@@ -1353,17 +1498,35 @@
  
  
  if $bugzillaURL != nil
@@ -651,9 +1204,112 @@ Index: cvsspam.rb
  $commentEncoder = MultiSub.new(commentSubstitutions)
  
  
-@@ -1546,11 +1667,14 @@
+@@ -1374,12 +1537,16 @@
+ 		 "T" => tagHandler,
+ 		 "A" => AddedFileHandler.new,
+ 		 "R" => RemovedFileHandler.new,
++		 "C" => CopiedFileHandler.new,
+ 		 "M" => ModifiedFileHandler.new,
++		 "P" => ModifiedPropsFileHandler.new,
+ 		 "V" => VersionHandler.new]
+ 
+ $handlers["A"].setTagHandler(tagHandler)
+ $handlers["R"].setTagHandler(tagHandler)
++$handlers["C"].setTagHandler(tagHandler)
+ $handlers["M"].setTagHandler(tagHandler)
++$handlers["P"].setTagHandler(tagHandler)
+ 
+ $fileEntries = Array.new
+ $task_list = Array.new
+@@ -1404,7 +1571,11 @@
+ end
+ 
+ if $subjectPrefix == nil
+-  $subjectPrefix = "[CVS #{Repository.array.join(',')}]"
++  if $svn
++    $subjectPrefix = "[SVN #{Repository.array.join(',')}]"
++  else
++    $subjectPrefix = "[CVS #{Repository.array.join(',')}]"
++  end
+ end
+ 
+ if $files_in_subject
+@@ -1451,6 +1622,8 @@
+   #removed {background-color:#ffdddd;}
+   #removedchars {background-color:#ff9999;font-weight:bolder;}
+   tr.alt #removed {background-color:#f7cccc;}
++  #copied {background-color:#ccccff;}
++  tr.alt #copied {background-color:#bbbbf7;}
+   #info {color:#888888;}
+   #context {background-color:#eeeeee;}
+   td {padding-left:.3em;padding-right:.3em;}
+@@ -1483,7 +1656,9 @@
+ 
+   filesAdded = 0
+   filesRemoved = 0
++  filesCopied = 0
+   filesModified  = 0
++  filesModifiedProps  = 0
+   totalLinesAdded = 0
+   totalLinesRemoved = 0
+   file_count = 0
+@@ -1492,24 +1667,26 @@
+   $fileEntries.each do |file|
+     unless file.repository == last_repository
+       last_repository = file.repository
+-      mail.print("<tr class=\"head\"><td colspan=\"#{last_repository.has_multiple_tags ? 5 : 4}\">")
++      mail.print("<tr class=\"head\"><td colspan=\"#{last_repository.has_multiple_tags ? 6 : 5}\">")
+       if last_repository.has_multiple_tags
+         mail.print("Mixed-tag commit")
+       else
+         mail.print("Commit")
+       end
+       mail.print(" in <b><tt>#{htmlEncode(last_repository.common_prefix)}</tt></b>")
+-      if last_repository.trunk_only?
+-        mail.print("<span id=\"info\"> on MAIN</span>")
+-      else
+-        mail.print(" on ")
+-        tagCount = 0
+-        last_repository.each_tag do |tag|
+-          tagCount += 1
+-          if tagCount > 1
+-            mail.print tagCount<last_repository.tag_count ? ", " : " &amp; "
++      if !$svn
++        if last_repository.trunk_only?
++          mail.print("<span id=\"info\"> on MAIN</span>")
++        else
++          mail.print(" on ")
++          tagCount = 0
++          last_repository.each_tag do |tag|
++            tagCount += 1
++            if tagCount > 1
++              mail.print tagCount<last_repository.tag_count ? ", " : " &amp; "
++            end
++            mail.print tag ? htmlEncode(tag) : "<span id=\"info\">MAIN</span>"
+           end
+-          mail.print tag ? htmlEncode(tag) : "<span id=\"info\">MAIN</span>"
+         end
+       end
+       mail.puts("</td></tr>")
+@@ -1524,8 +1701,12 @@
+       filesAdded += 1
+     elsif file.removal?
+       filesRemoved += 1
++    elsif file.copied?
++      filesCopied += 1
+     elsif file.modification?
+       filesModified += 1
++    elsif file.modifiedprops?
++      filesModifiedProps += 1
+     end
+     name = htmlEncode(file.name_after_common_prefix)
+     slashPos = name.rindex("/")
+@@ -1545,17 +1726,29 @@
+       name = "<span id=\"added\">#{name}</span>"
      elsif file.removal?
        name = "<span id=\"removed\">#{name}</span>"
++    elsif file.copied?
++      name = "<span id=\"copied\">#{name}</span>"
      end
 +    mail.print("<td>")
      if file.has_diff?
@@ -663,12 +1319,79 @@ Index: cvsspam.rb
 -      mail.print("<td><tt>#{prefix}#{name}</tt></td>")
 +      mail.print("<tt>#{prefix}#{name}</tt>")
      end
+-    if file.isEmpty
+-      mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[empty]</small></td>")
 +    mail.print(" #{$frontend.log(file)}")
 +    mail.print("</td>")
-     if file.isEmpty
-       mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[empty]</small></td>")
++    if file.copied?
++      mail.print("<td colspan=\"3\" align=\"center\"><small id=\"info\">[copied]</small></td>")
++    elsif file.isEmpty
++      mail.print("<td colspan=\"3\" align=\"center\"><small id=\"info\">[empty]</small></td>")
      elsif file.isBinary
-@@ -1667,12 +1791,13 @@
+-      mail.print("<td colspan=\"2\" align=\"center\"><small id=\"info\">[binary]</small></td>")
++      mail.print("<td colspan=\"3\" align=\"center\"><small id=\"info\">[binary]</small></td>")
+     else
++      if file.modifiedprops?
++        mail.print("<td align=\"right\"><small id=\"info\">[props]</small></td>")
++      else
++        mail.print("<td></td>")
++      end
+       if file.lineAdditions>0
+         totalLinesAdded += file.lineAdditions
+         mail.print("<td align=\"right\" id=\"added\">+#{file.lineAdditions}</td>")
+@@ -1582,15 +1775,19 @@
+       mail.print("<td nowrap=\"nowrap\" align=\"right\">added #{$frontend.version(file.path,file.toVer)}</td>")
+     elsif file.removal?
+       mail.print("<td nowrap=\"nowrap\">#{$frontend.version(file.path,file.fromVer)} removed</td>")
++    elsif file.copied?
++      mail.print("<td nowrap=\"nowrap\" align=\"center\">#{$frontend.version(file.path,file.fromVer)} #{$frontend.diff(file)} #{$frontend.version(file.path,file.toVer)}</td>")
+     elsif file.modification?
+       mail.print("<td nowrap=\"nowrap\" align=\"center\">#{$frontend.version(file.path,file.fromVer)} #{$frontend.diff(file)} #{$frontend.version(file.path,file.toVer)}</td>")
++    elsif file.modifiedprops?
++      mail.print("<td nowrap=\"nowrap\" align=\"center\">#{$frontend.version(file.path,file.fromVer)} #{$frontend.diff(file)} #{$frontend.version(file.path,file.toVer)}</td>")
+     end
+ 
+     mail.puts("</tr>")
+   end
+   if $fileEntries.size>1 && (totalLinesAdded+totalLinesRemoved)>0
+     # give total number of lines added/removed accross all files
+-    mail.print("<tr><td></td>")
++    mail.print("<tr><td></td><td></td>")
+     if totalLinesAdded>0
+       mail.print("<td align=\"right\" id=\"added\">+#{totalLinesAdded}</td>")
+     else
+@@ -1607,7 +1804,7 @@
+   
+   mail.puts("</table>")
+ 
+-  totalFilesChanged = filesAdded+filesRemoved+filesModified
++  totalFilesChanged = filesAdded+filesRemoved+filesCopied+filesModified+filesModifiedProps
+   if totalFilesChanged > 1
+     mail.print("<small id=\"info\">")
+     changeKind = 0
+@@ -1620,11 +1817,21 @@
+       mail.print("#{filesRemoved} removed")
+       changeKind += 1
+     end
++    if filesCopied>0
++      mail.print(" + ") if changeKind>0
++      mail.print("#{filesCopied} copied")
++      changeKind += 1
++    end
+     if filesModified>0
+       mail.print(" + ") if changeKind>0
+       mail.print("#{filesModified} modified")
+       changeKind += 1
+     end
++    if filesModifiedProps>0
++      mail.print(" + ") if changeKind>0
++      mail.print("#{filesModifiedProps} modified properties")
++      changeKind += 1
++    end
+     mail.print(", total #{totalFilesChanged}") if changeKind > 1
+     mail.puts(" files</small><br />")
+   end
+@@ -1667,12 +1874,13 @@
  # CVSROOT/users file, if the file exists.  The argument is returned unchanged
  # if no alias is found.
  def sender_alias(email)
@@ -683,7 +1406,7 @@ Index: cvsspam.rb
            end
          end
        end
-@@ -1686,6 +1811,8 @@
+@@ -1686,6 +1894,8 @@
  # sensible header formatting, and for ensuring that the body is seperated
  # from the message headers by a blank line (as it is required to be).
  class MailContext
@@ -692,7 +1415,7 @@ Index: cvsspam.rb
    def initialize(io)
      @done_headers = false
      @io = io
-@@ -1695,8 +1822,8 @@
+@@ -1695,8 +1905,8 @@
    # called
    def header(name, value)
      raise "headers already commited" if @done_headers
@@ -703,7 +1426,7 @@ Index: cvsspam.rb
      else
        @io.puts("#{name}: #{value}")
      end
-@@ -1769,7 +1896,7 @@
+@@ -1769,7 +1979,7 @@
        ctx.header("To", recipients.map{|addr| addr.encoded}.join(','))
        blah("Mail From: <#{from}>")
        ctx.header("From", from.encoded) if from
@@ -712,7 +1435,7 @@ Index: cvsspam.rb
        yield ctx
      end
    end
-@@ -1800,10 +1927,10 @@
+@@ -1800,10 +2010,10 @@
    return unless $fileEntries.length == 1
    file = $fileEntries[0]
    name = zap_header_special_chars(file.path)
@@ -725,7 +1448,7 @@ Index: cvsspam.rb
      mail.header("Message-ID", make_msg_id("#{name}.#{file.toVer}", $hostname))
    end
  end
-@@ -1834,6 +1961,14 @@
+@@ -1834,6 +2044,14 @@
      end
    end
    mail.header("X-Mailer", "CVSspam #{$version} <http://www.badgers-in-foil.co.uk/projects/cvsspam/>")
@@ -769,4 +1492,11 @@ Property changes on: testcases/README
 ___________________________________________________________________
 Deleted: svn:executable
    - *
+
+
+Property changes on: .
+___________________________________________________________________
+Added: svn:ignore
+   + .project
+
 
