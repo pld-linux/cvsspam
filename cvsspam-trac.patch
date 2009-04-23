@@ -1,0 +1,103 @@
+--- cvsspam-0.2.12/cvsspam.rb	2009-04-23 20:18:09.329309382 +0300
++++ tmp/cvsspam.rb	2009-04-23 19:19:04.000000000 +0300
+@@ -560,6 +560,10 @@
+ jiraSub = proc { |match|
+   "<a href=\"#{$jiraURL.sub(/%s/, match)}\">#{match}</a>"
+ }
++tracSub = proc { |match|
++  match =~ /([0-9]+)/
++  "<a href=\"#{"$tracURL/ticket/%s".sub(/%s/, $1)}\">#{match}</a>"
++}
+ ticketSub = proc { |match|
+   match =~ /([0-9]+)/
+   "<a href=\"#{$ticketURL.sub(/%s/, $1)}\">#{match}</a>"
+@@ -930,15 +934,15 @@
+ # Link to Trac
+ class TracFrontend < WebFrontend
+   def path_url(path, tag)
+-    add_repo("#{@base_url}browser/#{urlEncode(path)}")
++    add_repo("#{@base_url}/browser/#{urlEncode(path)}")
+   end
+ 
+   def version_url(path, version)
+-    add_repo("#{@base_url}browser/#{urlEncode(path)}?rev=#{version}")
++    add_repo("#{@base_url}/browser/#{urlEncode(path)}?rev=#{version}")
+   end
+ 
+   def diff_url(file)
+-    add_repo("#{@base_url}changeset/#{file.toVer}")
++    add_repo("#{@base_url}/changeset/#{file.toVer}")
+   end
+ 
+   protected
+@@ -949,7 +953,7 @@
+     else
+       log_anchor = ""
+     end
+-    add_repo("#{@base_url}log/#{urlEncode(file.path)}#{log_anchor}")
++    add_repo("#{@base_url}/log/#{urlEncode(file.path)}#{log_anchor}")
+   end
+ end
+ 
+@@ -1772,6 +1784,24 @@
+   fail "No email recipients defined"
+ end
+ 
++if $viewcvsURL != nil || $cvswebURL !=nil
++  if $repository_name == GUESS
++    # use the last component of the repository path as the name
++    ENV['CVSROOT'] =~ /([^\/]+$)/
++	$repository_name = $1
++  end
++end
++
++# if $tracProjects is set process repository_name to setup new $tracURL
++if $tracProjects != nil && $tracURL != nil
++	$tracProjects.sort {|a,b| b[1] <=> a[1] }.each do |project, path|
++	   	if $repository_name.index(path) == 0
++			$tracURL = "#{$tracURL}/#{project}"
++			break
++		end
++	end
++end
++
+ if $viewcvsURL != nil
+   $viewcvsURL << "/" unless $viewcvsURL =~ /\/$/
+   $frontend = ViewCVSFrontend.new($viewcvsURL)
+@@ -1781,23 +1811,15 @@
+   $cvswebURL << "/" unless $cvswebURL =~ /\/$/
+   $frontend = CVSwebFrontend.new($cvswebURL)
+ elsif $tracURL !=nil
+-  $tracURL << "/" unless $tracURL =~ /\/$/
+   $frontend = TracFrontend.new($tracURL)
+ else
+   $frontend = NoFrontend.new
+ end
+ 
+-if $viewcvsURL != nil || $cvswebURL !=nil
+-  if $repository_name == GUESS
+-    # use the last component of the repository path as the name
+-    ENV['CVSROOT'] =~ /([^\/]+$)/
+-    $frontend.repository_name = $1
+-  elsif $repository_name != nil
+-    $frontend.repository_name = $repository_name
+-  end
++if $repository_name != nil
++	$frontend.repository_name = $repository_name
+ end
+ 
+-
+ if $bugzillaURL != nil
+   commentSubstitutions['\b[Bb](?:[Uu][Gg])?\s*[#:]?\s*\[?[0-9]+\]?'] = bugzillaSub
+ end
+@@ -1810,7 +1832,9 @@
+ if $jiraURL != nil
+   commentSubstitutions['\b[a-zA-Z]+-[0-9]+\b'] = jiraSub
+ end
+-if $ticketURL != nil
++if $tracURL != nil
++  commentSubstitutions['\b[Tt][Ii][Cc][Kk][Ee][Tt]\s*#?[0-9]+\b'] = tracSub
++elsif $ticketURL != nil
+   commentSubstitutions['\b[Tt][Ii][Cc][Kk][Ee][Tt]\s*#?[0-9]+\b'] = ticketSub
+ end
+ if $issueURL != nil
