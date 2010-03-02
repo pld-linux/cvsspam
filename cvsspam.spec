@@ -2,7 +2,7 @@ Summary:	CVSspam emails you diffs when someone commits a change to your CVS repo
 Summary(pl.UTF-8):	CVSspam - wysyłanie różnic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.12
-Release:	11.12
+Release:	12
 License:	GPL
 Group:		Applications/System
 Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/releases/%{name}-%{version}.tar.gz
@@ -44,13 +44,13 @@ rm svn_post_commit_hook.rb
 %install
 rm -rf $RPM_BUILD_ROOT
 install -d $RPM_BUILD_ROOT{%{_libdir},%{_datadir},%{_sysconfdir}}
-
-install {collect_diffs,cvsspam,record_lastdir}.rb $RPM_BUILD_ROOT%{_datadir}
-install cvsspam.conf $RPM_BUILD_ROOT%{_sysconfdir}
+install -p {collect_diffs,cvsspam,record_lastdir}.rb $RPM_BUILD_ROOT%{_datadir}
+cp -a cvsspam.conf $RPM_BUILD_ROOT%{_sysconfdir}
 
 # svn part
-install svn_post_commit_hook.rb $RPM_BUILD_ROOT%{_datadir}
+install -p svn_post_commit_hook.rb $RPM_BUILD_ROOT%{_datadir}
 
+# compat
 ln -s %{_datadir} $RPM_BUILD_ROOT%{_libdir}/%{name}
 
 %clean
