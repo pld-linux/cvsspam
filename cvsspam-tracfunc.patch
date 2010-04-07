@@ -1,5 +1,5 @@
---- cvsspam-0.2.12/cvsspam.rb~	2009-04-23 20:18:09.329309382 +0300
-+++ cvsspam-0.2.12/cvsspam.rb	2009-04-23 19:19:04.000000000 +0300
+--- cvsspam-0.2.12/cvsspam.rb	2009-04-23 19:19:04.000000000 +0300
++++ cvsspam-0.2.12/cvsspam.rb	2010-04-07 18:22:52.000000000 +0300
 @@ -560,6 +560,10 @@
  jiraSub = proc { |match|
    "<a href=\"#{$jiraURL.sub(/%s/, match)}\">#{match}</a>"
@@ -39,7 +39,15 @@
    end
  end
  
-@@ -1772,6 +1784,24 @@
+@@ -1699,6 +1703,7 @@
+ $choraURL = nil
+ $cvswebURL = nil
+ $tracURL = nil
++$tracProjects = nil
+ $from_address = nil
+ $subjectPrefix = nil
+ $files_in_subject = false;
+@@ -1780,6 +1785,24 @@
    fail "No email recipients defined"
  end
  
@@ -64,7 +72,7 @@
  if $viewcvsURL != nil
    $viewcvsURL << "/" unless $viewcvsURL =~ /\/$/
    $frontend = ViewCVSFrontend.new($viewcvsURL)
-@@ -1781,23 +1811,15 @@
+@@ -1789,23 +1812,15 @@
    $cvswebURL << "/" unless $cvswebURL =~ /\/$/
    $frontend = CVSwebFrontend.new($cvswebURL)
  elsif $tracURL !=nil
@@ -90,7 +98,7 @@
  if $bugzillaURL != nil
    commentSubstitutions['\b[Bb](?:[Uu][Gg])?\s*[#:]?\s*\[?[0-9]+\]?'] = bugzillaSub
  end
-@@ -1810,7 +1832,9 @@
+@@ -1818,7 +1833,9 @@
  if $jiraURL != nil
    commentSubstitutions['\b[a-zA-Z]+-[0-9]+\b'] = jiraSub
  end
