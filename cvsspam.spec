@@ -2,7 +2,7 @@ Summary:	CVSspam emails you diffs when someone commits a change to your CVS repo
 Summary(pl.UTF-8):	CVSspam - wysyłanie różnic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.12
-Release:	12
+Release:	13
 License:	GPL
 Group:		Applications/System
 Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/releases/%{name}-%{version}.tar.gz
@@ -11,6 +11,7 @@ Source1:	%{name}-branch.sh
 Patch100:	%{name}-branch.diff
 Patch0:		%{name}-textdiff.patch
 Patch1:		%{name}-tracfunc.patch
+Patch2:		ruby19.patch
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
 BuildRequires:	rpmbuild(macros) >= 1.277
 Requires:	cvs-client
@@ -40,6 +41,7 @@ rm svn_post_commit_hook.rb
 %patch100 -p0
 %patch0 -p0
 %patch1 -p1
+%patch2 -p1
 
 %install
 rm -rf $RPM_BUILD_ROOT
