@@ -1,0 +1,52 @@
+fix warnings for "warning: shadowing outer local variable - line"
+side effect is that code starts to work again.
+
+--- cvsspam-0.2.12/collect_diffs.rb	2010-06-18 12:15:54.514725990 +0300
++++ cvsspam-0.2.12/collect_diffs.rb	2010-06-18 12:16:09.410605410 +0300
+@@ -169,8 +169,7 @@
+ 
+   raise "missing data dir (#{$tmpdir}/#{$dirtemplate}-XXXXXX)" if $datadir==nil
+ 
+-  line = $stdin.gets
+-  unless line =~ /^Update of (.+)/
++  unless $stdin.gets =~ /^Update of (.+)/
+     fail "Log preamble looks suspect (doesn't start 'Update of ...')"
+   end
+ 
+@@ -189,11 +188,15 @@
+   end
+ 
+   # look for the start of the user's comment
++  got_log_message = false
+   $stdin.each do |line|
+-    break if line =~ /^Log Message/
++    if line =~ /^Log Message/
++        got_log_message = true
++        break
++    end
+   end
+ 
+-  unless line =~ /^Log Message/
++  unless got_log_message
+     fail "Input did not contain a 'Log Message:' entry"
+   end
+ 
+@@ -273,12 +276,14 @@
+ 	blah("about to run #{diff_cmd.join(' ')}")
+ 	safer_popen(*diff_cmd) do |pipe|
+ 	  # skip over cvs-diff's preamble
+-	  pipe.each do |line|
+-	    break if line =~ /^diff /
++      line = nil
++      pipe.each do |l|
++          line = l
++          break if l =~ /^diff /
+ 	  end
+ 	  file.puts "#U #{line}"
+-	  pipe.each do |line|
+-	    file.puts "#U #{line}"
++     pipe.each do |l|
++       file.puts "#U #{l}"
+ 	  end
+ 	end
+       end
