@@ -1,6 +1,6 @@
---- cvsspam-0.2.12/cvsspam.rb~	2010-04-07 18:25:49.252489451 +0300
+--- cvsspam-0.2.12/cvsspam.rb	2010-04-07 18:27:22.000000000 +0300
 +++ cvsspam-0.2.12/cvsspam.rb	2010-04-07 18:27:22.000000000 +0300
-@@ -169,7 +171,7 @@
+@@ -171,7 +171,7 @@
  
    # test to see of the given string contains non-ASCII characters
    def requires_rfc2047?(word)
@@ -9,7 +9,16 @@
    end
  end
  
-@@ -2242,6 +2244,7 @@
+@@ -1680,7 +1680,7 @@
+ cvsroot_dir = "#{ENV['CVSROOT']}/CVSROOT"
+ $config = "#{cvsroot_dir}/cvsspam.conf"
+ $users_file = "#{cvsroot_dir}/users"
+-$users_file_charset = nil
++$users_file_charset = 'utf-8'
+ 
+ $debug = false
+ $svn = false
+@@ -2244,6 +2244,7 @@
    if File.exists?($users_file)
      File.open($users_file) do |io|
        io.each_line do |line|
