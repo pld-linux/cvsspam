@@ -15,6 +15,7 @@ Patch2:		ruby19.patch
 Patch3:		ruby19-shadow-outer-var.patch
 URL:		http://www.badgers-in-foil.co.uk/projects/cvsspam/
 BuildRequires:	rpmbuild(macros) >= 1.277
+BuildRequires:	ruby-modules
 Requires:	cvs-client
 %{?ruby_mod_ver_requires_eq}
 BuildArch:	noarch
