@@ -38,7 +38,7 @@ Index: cvsspam.conf
 +# cvsdiff keyword ignoring                (Default: show changes in keywords)
  #
  #     Changes in CVS keywords can be distracting.  For instance, the
--#   $Revision$ keyword will change on each commit.  Set this value to true
+-#   $Revision: 1.12 $ keyword will change on each commit.  Set this value to true
 +#   $Revision$ keyword will change on each commit.  Set this value to true
  #   to exclude changes in keyword fields (adds the -kk option to cvs diff).
  
