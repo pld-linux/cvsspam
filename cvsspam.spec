@@ -18,7 +18,6 @@ BuildRequires:	rpmbuild(macros) >= 1.277
 BuildRequires:	ruby-modules
 BuildRequires:	rpm-rubyprov
 Requires:	cvs-client
-%{?ruby_mod_ver_requires_eq}
 BuildArch:	noarch
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
