@@ -1,6 +1,6 @@
---- cvsspam.rb	2005-07-11 16:53:29.000000000 +0100
-+++ cvsspam.rb	2007-09-21 11:08:17.000000000 +0100
-@@ -590,6 +590,42 @@
+--- cvsspam.rb.orig
++++ cvsspam.rb
+@@ -628,6 +628,42 @@
    end
  end
  
@@ -43,7 +43,7 @@
  
  # Handle lines from LogReader that represent the name of the branch tag for
  # the next file in the log.  When files are committed to the trunk, the log
-@@ -649,6 +685,31 @@
+@@ -687,6 +723,31 @@
    end
  end
  
@@ -75,7 +75,7 @@
  # A do-nothing superclass for objects that know how to create hyperlinks to
  # web CVS interfaces (e.g. CVSweb).  Subclasses overide these methods to
  # wrap HTML link tags arround the text that this classes methods generate.
-@@ -659,6 +720,11 @@
+@@ -697,6 +758,11 @@
      htmlEncode(path)
    end
  
@@ -87,9 +87,9 @@
    # Just returns the value of the 'version' argument.  Subclasses should change
    # this into a link to the given version of the file.
    def version(path, version)
-@@ -670,6 +736,11 @@
-   def diff(file)
-     '-&gt;'
+@@ -714,6 +780,11 @@
+   def log(file)
+     ''
    end
 +
 +  # text diff
@@ -99,7 +99,7 @@
  end
  
  # Superclass for objects that can link to CVS frontends on the web (ViewCVS,
-@@ -810,6 +881,31 @@
+@@ -929,6 +1000,31 @@
    end
  end
  
@@ -131,7 +131,7 @@
  
  # Used by UnifiedDiffHandler to record the number of added and removed lines
  # appearing in a unidiff.
-@@ -1030,6 +1126,160 @@
+@@ -1162,6 +1258,160 @@
    end
  end
  
@@ -254,15 +254,15 @@
 +      when "A"
 +        print($frontend.textpath($file.basedir, $file.tag))
 +        println("\n")
-+        println("#{$file.file} added at #{$frontend.version($file.path,$file.toVer)}")
++        println("#{$file.file} added at #{$file.toVer}")
 +      when "R"
 +        print($frontend.textpath($file.basedir, $file.tag))
 +        println("\n")
-+        println("#{$file.file} removed after #{$frontend.version($file.path,$file.fromVer)}")
++        println("#{$file.file} removed after #{$file.fromVer}")
 +      when "M"
 +        print($frontend.textpath($file.basedir, $file.tag))
 +        println("\n")
-+        println("#{$file.file} #{$frontend.version($file.path,$file.fromVer)} #{$frontend.textdiff($file)} #{$frontend.version($file.path,$file.toVer)}")
++        println("#{$file.file} #{$file.fromVer} #{$frontend.textdiff($file)} #{$file.toVer}")
 +    end
 +    lines.each do |line|
 +      println(line)
@@ -292,7 +292,7 @@
  
  # Handle lines from LogReader that are the output from 'cvs diff -u' for the
  # particular file under consideration
-@@ -1084,6 +1334,57 @@
+@@ -1216,6 +1466,57 @@
    end
  end
  
@@ -350,26 +350,30 @@
  
  # a filter that counts the number of characters output to the underlying object
  class OutputCounter
-@@ -1381,6 +1682,18 @@
- $handlers["R"].setTagHandler(tagHandler)
+@@ -1560,6 +1861,22 @@
  $handlers["M"].setTagHandler(tagHandler)
+ $handlers["P"].setTagHandler(tagHandler)
  
 +$texthandlers = Hash[">" => TextCommentHandler.new,
 +		 "U" => TextUnifiedDiffHandler.new,
 +		 "T" => tagHandler,
 +		 "A" => TextAddedFileHandler.new,
 +		 "R" => TextRemovedFileHandler.new,
++		 "C" => CopiedFileHandler.new,
 +		 "M" => TextModifiedFileHandler.new,
++		 "P" => ModifiedPropsFileHandler.new,
 +		 "V" => VersionHandler.new]
 +
 +$texthandlers["A"].setTagHandler(tagHandler)
 +$texthandlers["R"].setTagHandler(tagHandler)
++$texthandlers["C"].setTagHandler(tagHandler)
 +$texthandlers["M"].setTagHandler(tagHandler)
++$texthandlers["P"].setTagHandler(tagHandler)
 +
  $fileEntries = Array.new
  $task_list = Array.new
  $allTags = Hash.new
-@@ -1403,6 +1716,24 @@
+@@ -1582,6 +1899,24 @@
  
  end
  
@@ -392,21 +396,22 @@
 +end
 +
  if $subjectPrefix == nil
-   $subjectPrefix = "[CVS #{Repository.array.join(',')}]"
- end
-@@ -1432,7 +1763,10 @@
+   if $svn
+     $subjectPrefix = "[SVN #{Repository.array.join(',')}]"
+@@ -1615,7 +1950,11 @@
  
  # generate the email header (and footer) having already generated the diffs
  # for the email body to a temp file (which is simply included in the middle)
 -def make_html_email(mail)
 +def make_html_email(mail, boundary)
++
 +  mail.puts("--#{boundary}")
-+  mail.puts("Content-Type: text/html;" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
++  mail.puts("Content-Type: text/html" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
 +  mail.puts("Content-Disposition: inline\n\n");
    mail.puts(<<HEAD)
  <html>
  <head>
-@@ -1660,7 +1994,7 @@
+@@ -1879,7 +2218,7 @@
    mail.puts("<center><small><a href=\"http://www.badgers-in-foil.co.uk/projects/cvsspam/\" title=\"commit -&gt; email\">CVSspam</a> #{$version}</small></center>")
  
    mail.puts("</body></html>")
@@ -415,7 +420,7 @@
  end
  
  # Tries to look up an 'alias' email address for the given string in the
-@@ -1818,11 +2152,188 @@
+@@ -2040,11 +2379,186 @@
  
  $from_address = sender_alias($from_address) unless $from_address.nil?
  
@@ -427,12 +432,10 @@
 +end
 +
 +def make_text_email(mail, boundary)
-+  mail.puts(<<HEAD)
-+--#{boundary}
-+Content-Type: text/plain; charset=us-ascii
-+Content-Disposition: inline
-+
-+HEAD
++  
++  mail.puts("--#{boundary}")
++  mail.puts("Content-Type: text/plain" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
++  mail.puts("Content-Disposition: inline\n\n");
 +
 +  haveTags = false
 +  Repository.each do |repository|
@@ -525,11 +528,11 @@
 +      end
 +    end
 +    if file.addition?
-+      mail.print("added #{$frontend.version(file.path,file.toVer)} ")
++      mail.print("added #{file.toVer} ")
 +    elsif file.removal?
-+      mail.print("#{$frontend.version(file.path,file.fromVer)} removed ")
++      mail.print("#{file.fromVer} removed ")
 +    elsif file.modification?
-+      mail.print("#{$frontend.version(file.path,file.fromVer)} #{$frontend.textdiff(file)} #{$frontend.version(file.path,file.toVer)} ")
++      mail.print("#{file.fromVer} #{$frontend.textdiff(file)} #{file.toVer} ")
 +    end
 +
 +    mail.puts("\n")
@@ -605,8 +608,8 @@
    if ENV['REMOTE_HOST']
      # TODO: I think this will always be an IP address.  If a hostname is
      # possible, it may need encoding of some kind,
-@@ -1836,6 +2347,7 @@
-   mail.header("X-Mailer", "CVSspam #{$version} <http://www.badgers-in-foil.co.uk/projects/cvsspam/>")
+@@ -2066,7 +2580,8 @@
+   end
  
    mail.body do |body|
 -    make_html_email(body)
@@ -614,88 +617,4 @@
 +    make_html_email(body, boundary)
    end
  end
---- cvsspam.rb	2009-03-05 02:14:14.149660640 +0200
-+++ cvsspam.rb	2009-03-05 02:06:57.409693131 +0200
-@@ -1943,8 +1943,9 @@
- # generate the email header (and footer) having already generated the diffs
- # for the email body to a temp file (which is simply included in the middle)
- def make_html_email(mail, boundary)
-+
-   mail.puts("--#{boundary}")
--  mail.puts("Content-Type: text/html;" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
-+  mail.puts("Content-Type: text/html" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
-   mail.puts("Content-Disposition: inline\n\n");
-   mail.puts(<<HEAD)
- <html>
-@@ -2378,12 +2379,10 @@
- end
  
- def make_text_email(mail, boundary)
--  mail.puts(<<HEAD)
----#{boundary}
--Content-Type: text/plain; charset=us-ascii
--Content-Disposition: inline
--
--HEAD
-+  
-+  mail.puts("--#{boundary}")
-+  mail.puts("Content-Type: text/plain" + ($charset.nil? ? "" : "; charset=\"#{$charset}\""))
-+  mail.puts("Content-Disposition: inline\n\n");
- 
-   haveTags = false
-   Repository.each do |repository|
---- cvsspam.rb	2009-03-05 02:40:37.616133405 +0200
-+++ cvsspam.rb	2009-03-05 02:38:55.616141228 +0200
-@@ -1375,15 +1375,15 @@
-       when "A"
-         print($frontend.textpath($file.basedir, $file.tag))
-         println("\n")
--        println("#{$file.file} added at #{$frontend.version($file.path,$file.toVer)}")
-+        println("#{$file.file} added at #{$file.toVer}")
-       when "R"
-         print($frontend.textpath($file.basedir, $file.tag))
-         println("\n")
--        println("#{$file.file} removed after #{$frontend.version($file.path,$file.fromVer)}")
-+        println("#{$file.file} removed after #{$file.fromVer}")
-       when "M"
-         print($frontend.textpath($file.basedir, $file.tag))
-         println("\n")
--        println("#{$file.file} #{$frontend.version($file.path,$file.fromVer)} #{$frontend.textdiff($file)} #{$frontend.version($file.path,$file.toVer)}")
-+        println("#{$file.file} #{$file.fromVer} #{$frontend.textdiff($file)} #{$file.toVer}")
-     end
-     lines.each do |line|
-       println(line)
-@@ -2475,11 +2475,11 @@
-       end
-     end
-     if file.addition?
--      mail.print("added #{$frontend.version(file.path,file.toVer)} ")
-+      mail.print("added #{file.toVer} ")
-     elsif file.removal?
--      mail.print("#{$frontend.version(file.path,file.fromVer)} removed ")
-+      mail.print("#{file.fromVer} removed ")
-     elsif file.modification?
--      mail.print("#{$frontend.version(file.path,file.fromVer)} #{$frontend.textdiff(file)} #{$frontend.version(file.path,file.toVer)} ")
-+      mail.print("#{file.fromVer} #{$frontend.textdiff(file)} #{file.toVer} ")
-     end
- 
-     mail.puts("\n")
---- cvsspam.rb	2009-03-05 19:26:38.950116565 +0200
-+++ cvsspam.rb	2009-03-05 16:29:57.947827866 +0200
-@@ -1862,12 +1862,16 @@
- 		 "T" => tagHandler,
- 		 "A" => TextAddedFileHandler.new,
- 		 "R" => TextRemovedFileHandler.new,
-+		 "C" => CopiedFileHandler.new,
- 		 "M" => TextModifiedFileHandler.new,
-+		 "P" => ModifiedPropsFileHandler.new,
- 		 "V" => VersionHandler.new]
- 
- $texthandlers["A"].setTagHandler(tagHandler)
- $texthandlers["R"].setTagHandler(tagHandler)
-+$texthandlers["C"].setTagHandler(tagHandler)
- $texthandlers["M"].setTagHandler(tagHandler)
-+$texthandlers["P"].setTagHandler(tagHandler)
- 
- $fileEntries = Array.new
- $task_list = Array.new
