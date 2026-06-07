@@ -2,7 +2,7 @@ Summary:	CVSspam emails you diffs when someone commits a change to your CVS repo
 Summary(pl.UTF-8):	CVSspam - wysyłanie różnic po wykonaniu zmiany w repozytorium CVS
 Name:		cvsspam
 Version:	0.2.12
-Release:	17
+Release:	18
 License:	GPL
 Group:		Applications/System
 Source0:	http://www.badgers-in-foil.co.uk/projects/cvsspam/releases/%{name}-%{version}.tar.gz
@@ -22,7 +22,6 @@ BuildArch:	noarch
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %define		_sysconfdir	/etc/%{name}
-%define		_datadir	%{_prefix}/share/%{name}
 %define		_libdir		%{_prefix}/lib
 
 %description
@@ -48,12 +47,12 @@ rm svn_post_commit_hook.rb
 
 %install
 rm -rf $RPM_BUILD_ROOT
-install -d $RPM_BUILD_ROOT{%{_libdir},%{_datadir},%{_sysconfdir}}
-install -p {collect_diffs,cvsspam,record_lastdir}.rb $RPM_BUILD_ROOT%{_datadir}
+install -d $RPM_BUILD_ROOT{%{_libdir},%{_datadir}/%{name},%{_sysconfdir}}
+install -p {collect_diffs,cvsspam,record_lastdir}.rb $RPM_BUILD_ROOT%{_datadir}/%{name}
 cp -a cvsspam.conf $RPM_BUILD_ROOT%{_sysconfdir}
 
 # svn part
-install -p svn_post_commit_hook.rb $RPM_BUILD_ROOT%{_datadir}
+install -p svn_post_commit_hook.rb $RPM_BUILD_ROOT%{_datadir}/%{name}
 
 # compat
 ln -s %{_datadir} $RPM_BUILD_ROOT%{_libdir}/%{name}
@@ -79,6 +78,6 @@ EOF
 %dir %{_sysconfdir}
 %config(noreplace) %verify(not md5 mtime size) %{_sysconfdir}/cvsspam.conf
 %dir %{_datadir}
-%attr(755,root,root) %{_datadir}/*.rb
+%attr(755,root,root) %{_datadir}/%{name}/*.rb
 
 %ghost %{_libdir}/%{name}
